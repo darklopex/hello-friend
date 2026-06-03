@@ -201,7 +201,7 @@ export default function App() {
               <div className="side-head"><History size={15} /> Recent Blocks</div>
               {history.length === 0 && <div className="empty sm">No settled rounds yet.</div>}
               {history.map((r) => {
-                const b = r.targetBlock;
+                const b = r.targetBlock || r.result?.block;
                 if (!b) return null;
                 return (
                   <div className="hist-row" key={r.id}>
@@ -210,6 +210,28 @@ export default function App() {
                   </div>
                 );
               })}
+              {historyPages > 1 && (
+                <div style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  gap: 8, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--line)",
+                }}>
+                  <button
+                    className="verify-btn"
+                    disabled={historyPage <= 1}
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    style={{ opacity: historyPage <= 1 ? 0.4 : 1 }}
+                  >← Prev</button>
+                  <span style={{ fontSize: 11, color: "var(--muted)", fontFamily: "var(--mono)" }}>
+                    Page {historyPage} / {historyPages}
+                  </span>
+                  <button
+                    className="verify-btn"
+                    disabled={historyPage >= historyPages}
+                    onClick={() => setHistoryPage((p) => Math.min(historyPages, p + 1))}
+                    style={{ opacity: historyPage >= historyPages ? 0.4 : 1 }}
+                  >Next →</button>
+                </div>
+              )}
             </aside>
           </div>
         </div>
