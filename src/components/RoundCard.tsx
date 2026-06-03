@@ -72,14 +72,19 @@ export default function RoundCard({
     if (!isOpen) return;
     if (mode.kind === "binary") setPick(side);
     // digit mode: keep whatever the user already selected from the pick grid
-    else setPick("");
+    else if (mode.kind === "number" || mode.kind === "pvp") setPick("");
+    // for "digit" we deliberately keep the current pick (user picked from grid)
     setLeverPulled(side);            // pull the lever inside the side button
     setConfirmPulled(false);
     setShowBet(true);
   };
 
   const finalPick = mode.kind === "number" || mode.kind === "pvp" ? num : pick;
-  const canConfirm = isOpen && !!addr && finalPick !== "" && !placing;
+  const validPick =
+    mode.kind === "binary" ? mode.picks!.includes(finalPick) :
+    mode.kind === "digit" ? HEX.includes(finalPick) :
+    finalPick !== "";
+  const canConfirm = isOpen && !!addr && validPick && !placing;
 
   const confirm = async () => {
     if (!canConfirm) return;
@@ -178,7 +183,13 @@ export default function RoundCard({
           {/* mode selector */}
           <div className="pm-modes">
             {MODES.map((m) => (
-              <button key={m.id} className={`pm-mode ${mode.id === m.id ? "on" : ""}`} onClick={() => setMode(m)}>{m.label}</button>
+              <button key={m.id} className={`pm-mode ${mode.id === m.id ? "on" : ""}`} onClick={() => {
+                setMode(m);
+                // reset pick when switching mode so digits don't inherit "even" etc.
+                if (m.kind === "binary" && m.picks) setPick(m.picks[0]);
+                else setPick("");
+                setNum("");
+              }}>{m.label}</button>
             ))}
           </div>
 
@@ -220,8 +231,22 @@ export default function RoundCard({
               {(mode.kind === "number" || mode.kind === "pvp") && (
                 <input className="num-input" type="number" placeholder={`Enter ${mode.hint}`} value={num} onChange={(e) => setNum(e.target.value)} />
               )}
-              <button className="pm-yes full glow" disabled={!isOpen || (!!addr && mode.kind !== "digit" && num === "")} onClick={() => openBet(pick)}>
-                {!isOpen ? "Locked" : !addr ? "Connect wallet to place bets" : "Place Bet ◆ 0.01"}
+              <button
+                className="pm-yes full glow"
+                disabled={
+                  !isOpen ||
+                  (!!addr && mode.kind === "digit" && !HEX.includes(pick)) ||
+                  (!!addr && (mode.kind === "number" || mode.kind === "pvp") && num === "")
+                }
+                onClick={() => openBet(pick)}
+              >
+                {!isOpen
+                  ? "Locked"
+                  : !addr
+                    ? "Connect wallet to place bets"
+                    : mode.kind === "digit" && !HEX.includes(pick)
+                      ? "Pick a digit"
+                      : "Place Bet ◆ 0.01"}
               </button>
             </div>
           )}

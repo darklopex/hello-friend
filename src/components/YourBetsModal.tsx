@@ -332,7 +332,7 @@ function BetCard({
         {MODES.map((m) => {
           const active = !!betsByMode[m.id];
           return (
-            <button key={m.id} style={modeRow(active)} onClick={() => onModeClick(m.id)}>
+            <button key={m.id} className="ybets-row" style={modeRow(active)} onClick={() => onModeClick(m.id)}>
               <span style={checkBox(active)}>{active && <Check size={14} strokeWidth={3} />}</span>
               <span>{m.label}</span>
             </button>

@@ -206,6 +206,12 @@ input,button{font-family:inherit}
 .hist h2{font-family:var(--display);font-size:16px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .hist-row{display:flex;align-items:center;gap:16px;padding:13px 16px;background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:8px;font-family:var(--mono);font-size:12.5px;flex-wrap:wrap}
 .hist-row .bn{color:var(--accent-2);font-weight:700}
+.hist-row .verify-btn{margin-left:auto}
+
+/* YourBets modal — neo-brutalist hover pop (same feel as .verify-btn) */
+.ybets-row{transition:transform .12s var(--ease),box-shadow .12s var(--ease)}
+.ybets-row:hover{transform:translate(2px,2px);box-shadow:0 0 0 0 rgba(0,0,0,.9) !important}
+.ybets-row:active{transform:translate(2px,2px);box-shadow:0 0 0 0 rgba(0,0,0,.9) !important}
 .hist-row .hh{color:var(--text-2);flex:1;min-width:160px;word-break:break-all}
 .hist-row .chip2{background:var(--panel-2);border:1px solid var(--line);border-radius:7px;padding:4px 9px;color:var(--text-2)}
 
