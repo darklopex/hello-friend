@@ -1,5 +1,5 @@
 import React from "react";
-import { Wallet2, ChevronDown, ChevronUp, ExternalLink, Clock } from "lucide-react";
+import { Wallet2, ChevronDown, ChevronUp, ExternalLink, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 import { EXPLORER } from "../lib/wagmi";
 import { MODE_MAP, signals as deriveSignals } from "../lib/modes";
 
@@ -23,6 +23,7 @@ type EndedBet = {
 };
 
 const API_BASE = (import.meta as any).env?.VITE_API_URL || "";
+const PAGE_SIZE = 3;
 
 function fmtClock(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -49,10 +50,13 @@ export default function YourBets({
   const [loading, setLoading] = React.useState(false);
   const [expanded, setExpanded] = React.useState<number | null>(null);
   const [verifyCache, setVerifyCache] = React.useState<Record<number, any>>({});
+  const [livePage, setLivePage] = React.useState(0);
+  const [endedPage, setEndedPage] = React.useState(0);
   const now = useNow();
 
   React.useEffect(() => {
-    if (!address) { setEnded([]); return; }
+    // Never clear ended on disconnect — fetch fresh whenever address present.
+    if (!address) return;
     let alive = true;
     const load = async () => {
       try {
@@ -60,7 +64,7 @@ export default function YourBets({
         const r = await fetch(`${API_BASE}/api/bets/${address}`);
         if (!r.ok) return;
         const j = await r.json();
-        if (alive) setEnded(j.bets || []);
+        if (alive) setEnded(Array.isArray(j.bets) ? j.bets : []);
       } catch { /* */ }
       finally { if (alive) setLoading(false); }
     };
@@ -68,6 +72,12 @@ export default function YourBets({
     const id = setInterval(load, 30000);
     return () => { alive = false; clearInterval(id); };
   }, [address]);
+
+  // Clamp current page when underlying arrays shrink.
+  const liveTotalPages = Math.max(1, Math.ceil(liveBets.length / PAGE_SIZE));
+  const endedTotalPages = Math.max(1, Math.ceil(ended.length / PAGE_SIZE));
+  React.useEffect(() => { if (livePage >= liveTotalPages) setLivePage(liveTotalPages - 1); }, [livePage, liveTotalPages]);
+  React.useEffect(() => { if (endedPage >= endedTotalPages) setEndedPage(endedTotalPages - 1); }, [endedPage, endedTotalPages]);
 
   const fetchVerify = async (block: number) => {
     if (verifyCache[block]) return;
@@ -88,6 +98,9 @@ export default function YourBets({
 
   const totalWon = ended.filter((b) => b.win).reduce((s, b) => s + (b.payout || 0), 0);
   const totalLost = ended.filter((b) => !b.win).reduce((s, b) => s + (b.stake || 0), 0);
+
+  const liveSlice = liveBets.slice(livePage * PAGE_SIZE, livePage * PAGE_SIZE + PAGE_SIZE);
+  const endedSlice = ended.slice(endedPage * PAGE_SIZE, endedPage * PAGE_SIZE + PAGE_SIZE);
 
   return (
     <div className="your-bets">
@@ -121,12 +134,12 @@ export default function YourBets({
               <div className="yb-empty-s">Place a bet on an open round to track it here.</div>
             </div>
           ) : (
-            liveBets.map((b, i) => {
+            liveSlice.map((b, i) => {
               const r = rounds.find((x) => x.id === b.roundId);
               const ms = r ? Math.max(0, r.settleAt - now) : 0;
               const meta = MODE_MAP[b.mode];
               return (
-                <div className="yb-live-card" key={i}>
+                <div className="yb-live-card" key={`${b.roundId}-${b.mode}-${b.pick}-${i}`}>
                   <div className="yb-live-top">
                     <span className="yb-mode">{meta?.label ?? b.mode}</span>
                     <span className="yb-pending"><Clock size={10} /> Pending · {fmtClock(ms)}</span>
@@ -139,6 +152,9 @@ export default function YourBets({
               );
             })
           )}
+          {liveBets.length > PAGE_SIZE && (
+            <Pager page={livePage} totalPages={liveTotalPages} onPage={setLivePage} />
+          )}
         </div>
       )}
 
@@ -150,7 +166,8 @@ export default function YourBets({
               <div className="yb-empty-s">{loading ? "Loading…" : "Your settled bets will show up here."}</div>
             </div>
           ) : (
-            ended.map((b, i) => {
+            endedSlice.map((b, idx) => {
+              const i = endedPage * PAGE_SIZE + idx;
               const isOpen = expanded === i;
               const meta = MODE_MAP[b.mode];
               const v = verifyCache[b.block];
@@ -165,6 +182,7 @@ export default function YourBets({
                   case "txou": actual = sig.txou.toUpperCase(); break;
                   case "gasou": actual = sig.gasou.toUpperCase(); break;
                   case "closest": actual = sig.mod1000; break;
+                  case "perfectblock": actual = `#${Number(v.block.number).toLocaleString()}`; break;
                 }
               }
               return (
@@ -184,7 +202,7 @@ export default function YourBets({
                       )}
                       <div className="yb-d-row"><i>Mode</i><b>{meta?.label ?? b.mode}</b></div>
                       <div className="yb-d-row"><i>Your pick</i><b className="mono">{b.pick.toUpperCase()}</b></div>
-                      <div className="yb-d-row"><i>Block produced</i><b className="mono">{String(actual)}</b></div>
+                      <div className="yb-d-row"><i>Signal</i><b className="mono">{String(actual)}</b></div>
                       <div className="yb-d-row"><i>Stake</i><b className="mono">◆ {b.stake.toFixed(4)}</b></div>
                       <div className="yb-d-row">
                         <i>Result</i>
@@ -206,8 +224,45 @@ export default function YourBets({
               );
             })
           )}
+          {ended.length > PAGE_SIZE && (
+            <Pager page={endedPage} totalPages={endedTotalPages} onPage={setEndedPage} />
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+function Pager({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (n: number) => void }) {
+  const btn: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    width: 28, height: 28, borderRadius: 8, background: "var(--panel-2)",
+    border: "1px solid var(--line-2)", color: "#fff", cursor: "pointer",
+  };
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      gap: 8, paddingTop: 6,
+    }}>
+      <button
+        style={{ ...btn, opacity: page <= 0 ? 0.35 : 1 }}
+        disabled={page <= 0}
+        onClick={() => onPage(Math.max(0, page - 1))}
+        aria-label="Previous"
+      >
+        <ChevronLeft size={14} />
+      </button>
+      <span style={{
+        fontFamily: "var(--mono)", fontSize: 11, color: "var(--muted)",
+      }}>{page + 1} / {totalPages}</span>
+      <button
+        style={{ ...btn, opacity: page >= totalPages - 1 ? 0.35 : 1 }}
+        disabled={page >= totalPages - 1}
+        onClick={() => onPage(Math.min(totalPages - 1, page + 1))}
+        aria-label="Next"
+      >
+        <ChevronRight size={14} />
+      </button>
     </div>
   );
 }
