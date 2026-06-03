@@ -2,14 +2,14 @@
  *  Used to render pick options, multipliers and descriptions. Settlement is
  *  authoritative on the server; this is for display + payout preview. */
 
-export type ModeId = "coinflip" | "hilo" | "digit" | "number" | "txou" | "gasou" | "closest";
+export type ModeId = "coinflip" | "hilo" | "digit" | "number" | "txou" | "gasou" | "closest" | "perfectblock";
 
 export type ModeMeta = {
   id: ModeId;
   label: string;
   desc: string;
   multiplier: number;
-  kind: "binary" | "digit" | "number" | "pvp";
+  kind: "binary" | "digit" | "number" | "pvp" | "perfectblock";
   picks?: string[];
   hint?: string;
 };
@@ -22,6 +22,7 @@ export const MODES: ModeMeta[] = [
   { id: "txou", label: "Txn O/U", desc: "More than 5 transactions in the block?", multiplier: 1.96, kind: "binary", picks: ["over", "under"] },
   { id: "gasou", label: "Gas O/U", desc: "Will gas used exceed 500,000?", multiplier: 1.96, kind: "binary", picks: ["over", "under"] },
   { id: "closest", label: "Closest (PvP)", desc: "Guess hash mod 1000. Closest player wins the whole pot.", multiplier: 0, kind: "pvp", hint: "0-999" },
+  { id: "perfectblock", label: "Perfect Block", desc: "Guess the exact block number → 50× reward.", multiplier: 50, kind: "perfectblock", hint: "block number" },
 ];
 
 export const MODE_MAP: Record<string, ModeMeta> = Object.fromEntries(MODES.map((m) => [m.id, m]));
