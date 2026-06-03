@@ -39,6 +39,7 @@ export default function RoundCard({
   const [confirmPulled, setConfirmPulled] = React.useState(false);
   // perfect block state
   const [pbCelebrate, setPbCelebrate] = React.useState(false);
+  const [pbPrefix, setPbPrefix] = React.useState("");
   const settledRef = React.useRef<number | null>(null);
 
   const msToLock = Math.max(0, round.lockAt - now);
@@ -46,6 +47,8 @@ export default function RoundCard({
   const settled = round.status === "settled" || !!round.result;
   const isOpen = !settled && msToLock > 0;
   const isLocked = !settled && msToLock <= 0;
+  const alreadyBetModes = React.useMemo(() => new Set(myBets.map((b) => b.mode)), [myBets]);
+  const modeAlreadyBet = alreadyBetModes.has(mode.id);
 
   React.useEffect(() => {
     if (round.result && settledRef.current !== round.id) {
