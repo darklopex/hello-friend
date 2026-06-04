@@ -342,7 +342,7 @@ function BetCard({
   blockKey: string;
   blockLabel: string;
   badgeKind: "live" | "win" | "loss";
-  badgeValue?: string;
+  badgeValue?: React.ReactNode;
   betsByMode: Record<string, any>;
   onModeClick: (mode: string) => void;
   highlightOrange?: boolean;
@@ -398,10 +398,10 @@ function ModeDetail({
     body = bet ? (
       <>
         <Row k="Your pick" v={bet.pick.toUpperCase()} mono />
-        <Row k="Stake" v={`◆ ${bet.stake.toFixed(4)}`} mono />
+        <Row k="Stake" v={<><Coin size={13} /> {bet.stake.toFixed(4)}</>} mono />
         <Row k="Est. target block" v={g?.estBlock ? `#${g.estBlock.toLocaleString()} ~` : "—"} mono />
         <Row k="Status" v="PENDING" />
-        {meta && meta.multiplier > 0 && <Row k="Potential win" v={`◆ ${(bet.stake * meta.multiplier).toFixed(4)}`} mono />}
+        {meta && meta.multiplier > 0 && <Row k="Potential win" v={<><Coin size={13} /> {(bet.stake * meta.multiplier).toFixed(4)}</>} mono />}
       </>
     ) : <NoBet />;
   } else {
