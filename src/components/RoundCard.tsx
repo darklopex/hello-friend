@@ -403,6 +403,7 @@ export default function RoundCard({
         </motion.div>
       </div>
       {helpOpen && <ModeHelpModal modeId={mode.id as ModeId} onClose={() => setHelpOpen(false)} />}
+      <BetToast data={toast} onClose={() => setToast(null)} />
     </motion.div>
   );
 }
