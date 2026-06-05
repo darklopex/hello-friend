@@ -44,6 +44,7 @@ export default function App() {
   const [pfBlock, setPfBlock] = React.useState<number | null>(null);
   const [liveBets, setLiveBets] = React.useState<LiveBet[]>([]);
   const [showYourBets, setShowYourBets] = React.useState(false);
+  const [showYourPoints, setShowYourPoints] = React.useState(false);
 
   const { address, isConnected } = useAccount();
   const { data: balance, refetch: refetchBal } = useBalance({ address });
