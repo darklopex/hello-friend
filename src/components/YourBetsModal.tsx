@@ -269,6 +269,7 @@ export default function YourBetsModal({
                         badgeKind={won ? "win" : "loss"}
                         badgeValue={<><>{won ? "+" : "-"}</><Coin size={11} />{Math.abs(g.net).toFixed(4)}</>}
                         betsByMode={Object.fromEntries(g.bets.map((b) => [b.mode, b]))}
+                        showPointsBadge
                         onModeClick={(m) => openDetail(`ended-${g.block}`, m, g.block)}
                         footer={
                           <a href={`${EXPLORER}/block/${g.block}`} target="_blank" rel="noreferrer"
@@ -338,7 +339,7 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function BetCard({
-  blockKey, blockLabel, badgeKind, badgeValue, betsByMode, onModeClick, highlightOrange, liveBadge, footer,
+  blockKey, blockLabel, badgeKind, badgeValue, betsByMode, onModeClick, highlightOrange, liveBadge, footer, showPointsBadge,
 }: {
   blockKey: string;
   blockLabel: string;
@@ -349,6 +350,7 @@ function BetCard({
   highlightOrange?: boolean;
   liveBadge?: React.ReactNode;
   footer?: React.ReactNode;
+  showPointsBadge?: boolean;
 }) {
   const badge =
     badgeKind === "live"
@@ -357,6 +359,20 @@ function BetCard({
           <div style={{ fontSize: 11 }}>{badgeKind === "win" ? "WIN" : "LOSS"}</div>
           <div style={{ fontSize: 11, marginTop: 2 }}>{badgeValue}</div>
         </div>;
+  const ptsPill = (label: string, bonus?: boolean): React.CSSProperties => ({
+    background: bonus ? "#facc15" : "#22c55e",
+    color: bonus ? "#0a0a0a" : "#fff",
+    border: "1.5px solid #000",
+    borderRadius: 999,
+    padding: "2px 7px",
+    fontSize: 10,
+    fontWeight: 900,
+    fontFamily: "'JetBrains Mono',monospace",
+    letterSpacing: ".02em",
+    lineHeight: 1.2,
+    boxShadow: "1.5px 1.5px 0 0 rgba(0,0,0,.85)",
+    whiteSpace: "nowrap",
+  });
   return (
     <div style={card(highlightOrange)}>
       {badge}
@@ -364,11 +380,18 @@ function BetCard({
       {liveBadge}
       <div style={{ marginTop: 12 }}>
         {MODES.map((m) => {
-          const active = !!betsByMode[m.id];
+          const bet = betsByMode[m.id];
+          const active = !!bet;
           return (
             <button key={m.id} className="ybets-row" style={modeRow(active)} onClick={() => onModeClick(m.id)}>
               <span style={checkBox(active)}>{active && <Check size={14} strokeWidth={3} />}</span>
               <span>{m.label}</span>
+              {showPointsBadge && active && (
+                <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4, alignItems: "center" }}>
+                  <span style={ptsPill("+10 pts")}>+10 pts</span>
+                  {bet?.win && <span style={ptsPill("+10 pts 🏆", true)}>+10 pts 🏆</span>}
+                </span>
+              )}
             </button>
           );
         })}

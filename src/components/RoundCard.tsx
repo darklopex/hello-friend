@@ -123,6 +123,7 @@ export default function RoundCard({
       if (res.ok) {
         setMyBets((p) => [...p, { mode: mode.id, pick: String(finalPick) }]);
         onBet({ mode: mode.id, pick: String(finalPick), txHash });
+        window.dispatchEvent(new CustomEvent("bob:points-credited", { detail: { points: 10 } }));
         const last4 = addr!.slice(-4);
         const ts4 = String(Date.now()).slice(-4);
         setToast({
