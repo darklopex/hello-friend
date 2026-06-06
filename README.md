@@ -258,7 +258,7 @@ BetsOnBlock is built **exclusively for LiteForge testnet (zkLTC)**:
 
 ## 👨‍💻 Built By
 
-**0xDarkSeidBull** ([@LitDeX1](https://x.com/LitDeX1))Solo builder, LitVM ecosystem contributor.
+**0xDarkSeidBull** ([@LitDEXApp](https://x.com/LitDEXApp))Solo builder, LitVM ecosystem contributor.
 
 Also building: [**LitDEX**](https://litdex.test-hub.xyz)All-in-one Web3 Hub on LiteForge (DEX, Social, NFTs, Games, Points).
 
