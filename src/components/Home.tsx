@@ -36,7 +36,7 @@ export default function Home({ onEnter }: { onEnter: () => void }) {
             <div className="num">1</div>
             <Clock size={22} />
             <h3>A round opens</h3>
-            <p>Two rounds run at once, staggered by 3 minutes. Pick the one you like and place your bets while it's open.</p>
+            <p>Five rounds run at once, staggered by 3 minutes. Pick the one you like and place your bets while it's open.</p>
           </div>
           <div className="step">
             <div className="num">2</div>
