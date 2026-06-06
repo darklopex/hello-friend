@@ -23,7 +23,7 @@ export default function Home({ onEnter }: { onEnter: () => void }) {
         <div className="hero-stats">
           <div><b>0.01</b><span>zkLTC per bet</span></div>
           <div><b>~0.2s</b><span>block time</span></div>
-          <div><b>7</b><span>game modes</span></div>
+          <div><b>8</b><span>game modes</span></div>
           <div><b>100%</b><span>verifiable</span></div>
         </div>
       </section>
@@ -36,13 +36,13 @@ export default function Home({ onEnter }: { onEnter: () => void }) {
             <div className="num">1</div>
             <Clock size={22} />
             <h3>A round opens</h3>
-            <p>Two rounds run at once, 5 minutes apart. Pick the one you like and place your bets while it's open.</p>
+            <p>Two rounds run at once, staggered by 3 minutes. Pick the one you like and place your bets while it's open.</p>
           </div>
           <div className="step">
             <div className="num">2</div>
             <Dice5 size={22} />
             <h3>Choose your bet</h3>
-            <p>Coin flip, hi-lo, lucky digit, number 0-99, transaction over/under, gas, or the PvP "closest" pool. Stack as many as you like, each is a flat 0.01 zkLTC.</p>
+            <p>Coin flip, hi-lo, lucky digit, number 0-99, transaction over/under, gas, closest pool, or Perfect Block (50×). Stack as many as you like, each is a flat 0.01 zkLTC.</p>
           </div>
           <div className="step">
             <div className="num">3</div>
