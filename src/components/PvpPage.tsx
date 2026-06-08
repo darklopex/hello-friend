@@ -9,11 +9,13 @@ const TILES = 30;
 
 type Status = {
   round_id: number;
-  status: "open" | "locked";
+  status: "open" | "locked" | "cooldown";
   time_left_ms: number;
   total_pool: number;
   drand_target_round: number | string;
   drand_verify_url: string;
+  cooldown_ms?: number;
+  next_round_at?: number;
 };
 
 type MyBet = { round_id: number; tile: number; amount: number };
@@ -69,8 +71,13 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
   const [now, setNow] = React.useState(Date.now());
   const [spinAngle, setSpinAngle] = React.useState(0);
   const [stopOnTile, setStopOnTile] = React.useState<number | null>(null);
+  const [lastResolvedRound, setLastResolvedRound] = React.useState<EndedRound | null>(null);
+  const [cooldownSeconds, setCooldownSeconds] = React.useState<number>(0);
+  const [spinInKey, setSpinInKey] = React.useState<number>(0);
+  const [toast, setToast] = React.useState<string | null>(null);
 
   const prevRoundRef = React.useRef<number | null>(null);
+  const prevStatusRef = React.useRef<string | null>(null);
 
   // tick for countdown
   React.useEffect(() => {
@@ -78,7 +85,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
     return () => clearInterval(id);
   }, []);
 
-  // poll status every 3s
+  // poll status every 2s
   const loadStatus = React.useCallback(async () => {
     try {
       const r = await fetch(`${API}/bets/status`, { cache: "no-store" });
@@ -90,7 +97,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
   }, []);
   React.useEffect(() => {
     loadStatus();
-    const id = setInterval(loadStatus, 3000);
+    const id = setInterval(loadStatus, 2000);
     return () => clearInterval(id);
   }, [loadStatus]);
 
@@ -108,6 +115,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
         drand_round: r.drand_target_round ?? r.drand_round,
       }));
       setHistory(normalized.slice(0, 10));
+      if (normalized[0]) setLastResolvedRound((prev) => prev?.round_id === normalized[0].round_id ? prev : normalized[0]);
     } catch { /* */ }
   }, []);
   React.useEffect(() => {
@@ -141,10 +149,36 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       const last = history[0];
       if (last && last.round_id === prevRoundRef.current) {
         triggerSpinTo(last.winning_tile, last);
+        setLastResolvedRound(last);
       }
       prevRoundRef.current = status.round_id;
     }
   }, [status, history]);
+
+  // cooldown countdown + status transitions
+  React.useEffect(() => {
+    if (!status) return;
+    const prev = prevStatusRef.current;
+    if (status.status === "cooldown") {
+      const ms = status.cooldown_ms ?? (status.next_round_at ? status.next_round_at - Date.now() : 0);
+      setCooldownSeconds(Math.max(0, Math.ceil(ms / 1000)));
+    } else if (prev === "cooldown" && status.status === "open") {
+      setCooldownSeconds(0);
+      setSpinInKey((k) => k + 1);
+      setToast(`🎲 Round #${status.round_id} Started — Place Your Bets!`);
+      setTimeout(() => setToast(null), 3500);
+    }
+    prevStatusRef.current = status.status;
+  }, [status]);
+
+  // tick cooldown each second
+  React.useEffect(() => {
+    if (status?.status !== "cooldown") return;
+    const id = setInterval(() => {
+      setCooldownSeconds((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status?.status, status?.round_id]);
 
   // wheel slow spin while open
   React.useEffect(() => {
@@ -196,12 +230,13 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
     : 0;
   const isLocked = status?.status === "locked";
   const isOpen = status?.status === "open";
+  const isCooldown = status?.status === "cooldown";
   const myBetsThisRound = myBets.filter((b) => status && b.round_id === status.round_id);
   const myTilesThisRound = new Set(myBetsThisRound.map((b) => b.tile));
 
   const onSegmentClick = (tile: number) => {
     if (!addr) { openConnectModal?.(); return; }
-    if (isLocked) return;
+    if (isLocked || isCooldown) return;
     if (myTilesThisRound.has(tile)) {
       setBetError("Already bet on this tile");
       setSelectedTile(tile);
@@ -282,7 +317,18 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
               borderTop: "26px solid #000", zIndex: 5,
             }} />
 
-            <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ maxWidth: "100%", height: "auto" }}>
+            <svg
+              key={spinInKey}
+              width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}
+              style={{
+                maxWidth: "100%", height: "auto",
+                opacity: isCooldown ? 0.4 : 1,
+                filter: isCooldown ? "blur(2px)" : "none",
+                pointerEvents: isCooldown ? "none" : "auto",
+                transition: "opacity .5s ease, filter .5s ease",
+                animation: spinInKey > 0 ? "pvpSpinIn .9s cubic-bezier(.16,.84,.3,1)" : undefined,
+              }}
+            >
               <g
                 style={{
                   transformOrigin: `${cx}px ${cy}px`,
@@ -357,6 +403,45 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
                 display: "inline-flex", alignItems: "center", gap: 6,
               }}>
                 <Lock size={14} /> LOCKED
+              </div>
+            )}
+
+            {isCooldown && (
+              <div style={{
+                position: "absolute", inset: 0, display: "grid", placeItems: "center",
+                zIndex: 10, pointerEvents: "none",
+              }}>
+                <div style={{
+                  background: "#0a0a0a", border: "4px solid #000", borderRadius: 16,
+                  boxShadow: "8px 8px 0 0 #000", padding: "22px 28px",
+                  textAlign: "center", minWidth: 300,
+                }}>
+                  <div style={{ fontSize: 12, letterSpacing: ".22em", color: "#9ca3af", fontWeight: 800 }}>
+                    🏆 ROUND #{lastResolvedRound?.round_id ?? "—"} ENDED
+                  </div>
+                  <div style={{ fontSize: 10, letterSpacing: ".22em", color: "#9ca3af", fontWeight: 800, marginTop: 14 }}>
+                    WINNING TILE
+                  </div>
+                  <div style={{
+                    fontFamily: "'Space Grotesk',system-ui,sans-serif",
+                    fontSize: "3rem", fontWeight: 900,
+                    color: "#fbbf24", textShadow: "0 0 30px #fbbf24",
+                    lineHeight: 1, margin: "4px 0 14px",
+                  }}>
+                    {lastResolvedRound?.winning_tile ?? "—"}
+                  </div>
+                  <div style={{ fontSize: 10, letterSpacing: ".22em", color: "#9ca3af", fontWeight: 800 }}>
+                    NEW ROUND STARTING IN
+                  </div>
+                  <div style={{
+                    fontFamily: "'JetBrains Mono',monospace",
+                    fontSize: "4rem", fontWeight: 900,
+                    color: "#00d4ff", textShadow: "0 0 20px #00d4ff",
+                    lineHeight: 1, marginTop: 4,
+                  }}>
+                    {cooldownSeconds}
+                  </div>
+                </div>
               </div>
             )}
 
