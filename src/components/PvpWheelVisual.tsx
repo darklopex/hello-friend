@@ -412,7 +412,7 @@ export default function PvpWheelVisual({
           );
         })}
 
-        <circle cx={cx} cy={cy} r={rHub} fill="transparent"
+        <circle cx={cx} cy={cy} r={rHub} fill="#0a0a0a"
           stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
         <circle cx={cx} cy={cy} r={rHub - 6} fill="none"
           stroke="rgba(249,115,22,0.18)" strokeWidth={1} />

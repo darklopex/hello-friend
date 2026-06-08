@@ -79,25 +79,6 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
 
   const prevRoundRef = React.useRef<number | null>(null);
   const prevStatusRef = React.useRef<string | null>(null);
-  const frozenUntilRef = React.useRef<number>(0);
-  const prevStatusValueRef = React.useRef<string | null>(null);
-
-  // ===== tile click sound =====
-  const playTick = React.useCallback((freq = 800) => {
-    try {
-      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (!AC) return;
-      const a = new AC();
-      const o = a.createOscillator();
-      const g = a.createGain();
-      o.connect(g); g.connect(a.destination);
-      o.frequency.value = freq;
-      g.gain.setValueAtTime(0.08, a.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.06);
-      o.start();
-      o.stop(a.currentTime + 0.06);
-    } catch (e) { /* */ }
-  }, []);
 
   // tick for countdown
   React.useEffect(() => {
@@ -111,8 +92,6 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       const r = await fetch(`${API}/bets/status`, { cache: "no-store" });
       if (!r.ok) return;
       const j = await r.json();
-      // Freeze status updates while end-of-round animation is playing
-      if (Date.now() < frozenUntilRef.current) return;
       setStatus(j);
       setStatusFetchedAt(Date.now());
     } catch { /* */ }
@@ -193,17 +172,6 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
     prevStatusRef.current = status.status;
   }, [status]);
 
-  // Freeze polling for ~18.5s when entering cooldown, so the wheel
-  // animation (fill→blink→spin→lock) plus the 10s winner lock can complete
-  // before any new round state lands.
-  React.useEffect(() => {
-    if (!status) return;
-    if (prevStatusValueRef.current !== "cooldown" && status.status === "cooldown") {
-      frozenUntilRef.current = Date.now() + 18500;
-    }
-    prevStatusValueRef.current = status.status;
-  }, [status?.status]);
-
   // tick cooldown each second
   React.useEffect(() => {
     if (status?.status !== "cooldown") return;
@@ -270,19 +238,11 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
   const onSegmentClick = (tile: number) => {
     if (!addr) { openConnectModal?.(); return; }
     if (isLocked || isCooldown) return;
-    // toggle deselect with lower tone
-    if (selectedTile === tile) {
-      playTick(500);
-      setSelectedTile(null);
-      return;
-    }
     if (myTilesThisRound.has(tile)) {
-      playTick(500);
       setBetError("Already bet on this tile");
       setSelectedTile(tile);
       return;
     }
-    playTick(800);
     setBetError(null);
     setSelectedTile(tile);
     setAmount("0.01");
@@ -353,8 +313,9 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 22, alignItems: "start" }}>
           {/* WHEEL */}
           <div style={{
-            background: "transparent",
-            border: "1px solid rgba(255,255,255,.06)", borderRadius: 22,
+            background: "radial-gradient(ellipse at center, #0f0f12 0%, #050507 75%)",
+            border: "1px solid rgba(255,255,255,.08)", borderRadius: 22,
+            boxShadow: "0 30px 60px -20px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.02)",
             padding: 24,
             display: "flex", justifyContent: "center", alignItems: "center",
             position: "relative", minHeight: 600,
