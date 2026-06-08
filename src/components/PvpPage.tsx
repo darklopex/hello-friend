@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowLeft, Shield, History, Wallet2, X, Lock } from "lucide-react";
+import { ArrowLeft, Shield, History, Wallet2, X, Lock, ExternalLink } from "lucide-react";
 import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import CoinImg from "./Coin";
@@ -579,89 +579,81 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       {/* VERIFY MODAL */}
       {verifyModal && (
         <div className="modal-bg" onClick={() => setVerifyModal(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{
-            background: "#0a0a0a", color: "#fff7ed", border: "4px solid #000",
-            boxShadow: "8px 8px 0 0 #000", maxWidth: 540, textAlign: "left",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 10, letterSpacing: ".22em", color: "#9ca3af", fontWeight: 800 }}>
-                  PROVABLY FAIR VERIFICATION
-                </div>
-                <h3 style={{ color: "#fff7ed", fontWeight: 900, margin: "4px 0 0", fontSize: 20 }}>
-                  Round #{verifyModal.round_id}
-                </h3>
-              </div>
-              <button onClick={() => setVerifyModal(null)}
-                style={{ background: "transparent", border: 0, cursor: "pointer", color: "#fff7ed" }}>
-                <X size={20} />
-              </button>
-            </div>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              <Shield size={18} style={{ display: "inline", marginRight: 8, verticalAlign: "-3px" }} />
+              How this round resolved
+            </h3>
+            <p className="sub">
+              Round #{verifyModal.round_id} — every step below is derived only from public Drand randomness, so you can re-run it yourself.
+            </p>
 
-            {verifyModal.loading && <div style={{ color: "#9ca3af", fontSize: 13, padding: 14 }}>Loading…</div>}
-            {verifyModal.error && <div style={{ color: "#fca5a5", fontSize: 13, padding: 14 }}>Error: {verifyModal.error}</div>}
+            {verifyModal.loading && <div className="empty">Loading round #{verifyModal.round_id}…</div>}
+            {verifyModal.error && <div className="warn">Could not load round #{verifyModal.round_id}: {verifyModal.error}</div>}
 
             {verifyModal.data && (() => {
               const d = verifyModal.data!;
-              const rand = d.drand_randomness || "";
+              const rand = (d.drand_randomness || "").replace(/^0x/, "");
               let bigStr = "—", remStr = "—";
               try {
                 if (rand) {
-                  const big = BigInt("0x" + rand.replace(/^0x/, ""));
+                  const big = BigInt("0x" + rand);
                   bigStr = big.toString();
                   remStr = (big % 30n).toString();
                 }
               } catch { /* */ }
-              const rem = remStr === "—" ? null : Number(remStr);
-              const stepBox: React.CSSProperties = {
-                background: "#111827", border: "2px solid #1f2937", borderRadius: 8,
-                padding: 10, marginTop: 6, fontFamily: "'JetBrains Mono',monospace",
-                fontSize: 12, color: "#fde047", wordBreak: "break-all",
-              };
-              const label: React.CSSProperties = {
-                fontSize: 11, letterSpacing: ".14em", color: "#9ca3af", fontWeight: 800,
-                textTransform: "uppercase", marginTop: 12,
-              };
+              const shortHex = rand.length > 40 ? rand.slice(0, 40) + "…" : rand;
+              const shortBig = bigStr.length > 40 ? bigStr.slice(0, 40) + "…" : bigStr;
+              const tile = d.winning_tile;
               return (
                 <>
-                  <div style={label}>Step 1 — Drand Randomness</div>
-                  <div style={{ fontSize: 11, color: "#9ca3af" }}>(fetched from decentralized network)</div>
-                  <div style={stepBox}>{rand || "—"}</div>
-
-                  <div style={label}>Step 2 — Convert hex to BigInt</div>
-                  <div style={stepBox}>
-                    <span style={{ color: "#9ca3af" }}>BigInt("0x" + randomness) =</span><br />
-                    {bigStr}
-                  </div>
-
-                  <div style={label}>Step 3 — Modulo 30 (get value 0–29)</div>
-                  <div style={stepBox}>
-                    <span style={{ color: "#9ca3af" }}>BigInt % 30 =</span> {remStr}
-                  </div>
-
-                  <div style={label}>Step 4 — Add 1 (tiles are 1–30)</div>
-                  <div style={{ ...stepBox, color: "#22c55e", fontWeight: 900, fontSize: 14 }}>
-                    {remStr} + 1 = Tile {d.winning_tile} ✅
-                  </div>
+                  <PvpAccordion
+                    name="PVP Tiles"
+                    result={`Tile ${tile}`}
+                    steps={[
+                      [`Drand randomness (round #${d.drand_target_round ?? "—"})`, shortHex || "—"],
+                      ["Convert hex → BigInt", shortBig],
+                      ["BigInt % 30 (get 0-29)", remStr],
+                      ["Add 1 (tiles are 1-30)", `${remStr} + 1 = ${tile}`],
+                    ]}
+                  />
 
                   {d.drand_verify_url && (
-                    <a href={d.drand_verify_url} target="_blank" rel="noreferrer"
-                      style={{
-                        display: "inline-flex", alignItems: "center", gap: 6,
-                        marginTop: 16, textDecoration: "none",
-                        background: "#fde047", color: "#0a0a0a",
-                        border: "3px solid #000", borderRadius: 10,
-                        padding: "10px 14px", fontFamily: "'Space Grotesk',system-ui,sans-serif",
-                        fontWeight: 900, fontSize: 13, letterSpacing: ".04em",
-                        boxShadow: "4px 4px 0 0 #000",
-                      }}>
-                      <Shield size={13} /> ↗ Verify on Drand
+                    <a className="pf-btn" style={{ marginTop: 12 }}
+                      href={d.drand_verify_url} target="_blank" rel="noreferrer">
+                      Verify on Drand <ExternalLink size={11} />
                     </a>
                   )}
                 </>
               );
             })()}
+
+            <button className="modal-close" onClick={() => setVerifyModal(null)}>Close</button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PvpAccordion({ name, result, steps }: { name: string; result: string; steps: Array<[string, string]> }) {
+  const [open, setOpen] = React.useState(true);
+  return (
+    <div className="pf-game">
+      <button className="pf-game-head" onClick={() => setOpen((o) => !o)}>
+        <span className="gn">{name}</span>
+        <span className="gr">{result}</span>
+        <span className={`chev ${open ? "o" : ""}`}>▾</span>
+      </button>
+      {open && (
+        <div className="pf-steps">
+          {steps.map(([label, val], i) => (
+            <div className="pf-step" key={i}>
+              <span className="si">{i + 1}</span>
+              <span className="sl">{label}</span>
+              {val && <span className="sv">{val}</span>}
+            </div>
+          ))}
         </div>
       )}
     </div>
