@@ -477,12 +477,10 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
                   }}>
                     Tile {r.winning_tile}
                   </span>
-                  {r.drand_verify_url && (
-                    <a href={r.drand_verify_url} target="_blank" rel="noreferrer"
-                      className="verify-btn" style={{ textDecoration: "none", fontSize: 11, padding: "5px 10px" }}>
-                      Verify
-                    </a>
-                  )}
+                  <button onClick={() => openVerify(r.round_id)}
+                    className="verify-btn" style={{ fontSize: 11, padding: "5px 10px", cursor: "pointer" }}>
+                    Verify
+                  </button>
                 </div>
               ))}
             </div>
