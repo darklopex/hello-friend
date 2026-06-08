@@ -3,6 +3,7 @@ import { ArrowLeft, Shield, History, Wallet2, X, Lock, ExternalLink } from "luci
 import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import CoinImg from "./Coin";
+import PvpWheelVisual from "./PvpWheelVisual";
 
 const API = "https://lit-api.test-hub.xyz";
 const TILES = 30;
@@ -273,10 +274,17 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
 
   // wheel geometry
   const SIZE = 560;
-  const cx = SIZE / 2, cy = SIZE / 2;
-  const rOuter = 250;
-  const rInner = 110;
-  const segDeg = 360 / TILES;
+
+  // approximate total round window for progress bar — use whatever we last saw
+  const totalRoundMsRef = React.useRef<number>(60000);
+  React.useEffect(() => {
+    if (status?.status === "open" && status.time_left_ms > totalRoundMsRef.current) {
+      totalRoundMsRef.current = status.time_left_ms;
+    }
+  }, [status]);
+  const cooldownMsLeft = isCooldown
+    ? Math.max(0, (status?.cooldown_ms ?? cooldownSeconds * 1000))
+    : 0;
 
   return (
     <div className="app zone-mode" style={{ minHeight: "100vh" }}>
@@ -305,146 +313,29 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 22, alignItems: "start" }}>
           {/* WHEEL */}
           <div style={{
-            background: "#fff", border: "4px solid #000", borderRadius: 18,
-            boxShadow: "8px 8px 0 0 #000", padding: 24,
+            background: "radial-gradient(ellipse at center, #0f0f12 0%, #050507 75%)",
+            border: "1px solid rgba(255,255,255,.08)", borderRadius: 22,
+            boxShadow: "0 30px 60px -20px rgba(0,0,0,.7), inset 0 0 0 1px rgba(255,255,255,.02)",
+            padding: 24,
             display: "flex", justifyContent: "center", alignItems: "center",
             position: "relative", minHeight: 600,
           }}>
-            {/* pointer */}
-            <div style={{
-              position: "absolute", top: 18, left: "50%", transform: "translateX(-50%)",
-              width: 0, height: 0,
-              borderLeft: "16px solid transparent", borderRight: "16px solid transparent",
-              borderTop: "26px solid #000", zIndex: 5,
-            }} />
-
-            <svg
-              key={spinInKey}
-              width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}
-              style={{
-                maxWidth: "100%", height: "auto",
-                opacity: isCooldown ? 0.4 : 1,
-                filter: isCooldown ? "blur(2px)" : "none",
-                pointerEvents: isCooldown ? "none" : "auto",
-                transition: "opacity .5s ease, filter .5s ease",
-                animation: spinInKey > 0 ? "pvpSpinIn .9s cubic-bezier(.16,.84,.3,1)" : undefined,
-              }}
-            >
-              <g
-                style={{
-                  transformOrigin: `${cx}px ${cy}px`,
-                  transform: `rotate(${spinAngle}deg)`,
-                  transition: stopOnTile != null
-                    ? "transform 3s cubic-bezier(.16,.84,.3,1)"
-                    : "none",
-                }}
-              >
-                {Array.from({ length: TILES }, (_, i) => {
-                  const tile = i + 1;
-                  const a0 = i * segDeg;
-                  const a1 = a0 + segDeg;
-                  const mine = myTilesThisRound.has(tile);
-                  const isWinner = stopOnTile === tile;
-                  const base = i % 2 === 0 ? "#fff7ed" : "#fde68a";
-                  const fill = isWinner ? "#22c55e" : mine ? "#3b82f6" : base;
-                  const [tx, ty] = pt(cx, cy, (rOuter + rInner) / 2, a0 + segDeg / 2);
-                  return (
-                    <g key={tile} onClick={() => onSegmentClick(tile)} style={{ cursor: isLocked ? "not-allowed" : "pointer" }}>
-                      <path
-                        d={arcPath(cx, cy, rOuter, rInner, a0, a1)}
-                        fill={fill}
-                        stroke="#000"
-                        strokeWidth={2}
-                      />
-                      <text
-                        x={tx} y={ty}
-                        textAnchor="middle" dominantBaseline="central"
-                        fontFamily="'JetBrains Mono',monospace"
-                        fontWeight={900}
-                        fontSize={18}
-                        fill={mine || isWinner ? "#fff" : "#0a0a0a"}
-                        style={{ pointerEvents: "none" }}
-                        transform={`rotate(${a0 + segDeg / 2}, ${tx}, ${ty})`}
-                      >
-                        {tile}
-                      </text>
-                    </g>
-                  );
-                })}
-              </g>
-
-              {/* center disc */}
-              <circle cx={cx} cy={cy} r={rInner - 4} fill="#0a0a0a" stroke="#000" strokeWidth={3} />
-              <text x={cx} y={cy - 14} textAnchor="middle"
-                fill="#fff7ed" fontFamily="'Space Grotesk',system-ui,sans-serif"
-                fontSize={11} fontWeight={800} letterSpacing={2}>TOTAL POOL</text>
-              <text x={cx} y={cy + 16} textAnchor="middle"
-                fill="#fde047" fontFamily="'JetBrains Mono',monospace"
-                fontSize={28} fontWeight={900}>
-                {(status?.total_pool ?? 0).toFixed(2)}
-              </text>
-              <text x={cx} y={cy + 38} textAnchor="middle"
-                fill="#fff7ed" fontFamily="'Space Grotesk',system-ui,sans-serif"
-                fontSize={10} fontWeight={700} letterSpacing={2}>zkLTC</text>
-              <text x={cx} y={cy + 60} textAnchor="middle"
-                fill="#9ca3af" fontFamily="'JetBrains Mono',monospace"
-                fontSize={10} fontWeight={800} letterSpacing={1}>
-                ROUND #{status?.round_id ?? "—"}
-              </text>
-            </svg>
-
-            {isLocked && (
-              <div style={{
-                position: "absolute", top: 24, right: 24,
-                background: "#ef4444", color: "#fff",
-                border: "3px solid #000", borderRadius: 10,
-                boxShadow: "4px 4px 0 0 #000",
-                padding: "8px 14px", fontFamily: "'Space Grotesk',system-ui,sans-serif",
-                fontWeight: 900, letterSpacing: ".14em",
-                display: "inline-flex", alignItems: "center", gap: 6,
-              }}>
-                <Lock size={14} /> LOCKED
-              </div>
-            )}
-
-            {isCooldown && (
-              <div style={{
-                position: "absolute", inset: 0, display: "grid", placeItems: "center",
-                zIndex: 10, pointerEvents: "none",
-              }}>
-                <div style={{
-                  background: "#0a0a0a", border: "4px solid #000", borderRadius: 16,
-                  boxShadow: "8px 8px 0 0 #000", padding: "22px 28px",
-                  textAlign: "center", minWidth: 300,
-                }}>
-                  <div style={{ fontSize: 12, letterSpacing: ".22em", color: "#9ca3af", fontWeight: 800 }}>
-                    🏆 ROUND #{lastResolvedRound?.round_id ?? "—"} ENDED
-                  </div>
-                  <div style={{ fontSize: 10, letterSpacing: ".22em", color: "#9ca3af", fontWeight: 800, marginTop: 14 }}>
-                    WINNING TILE
-                  </div>
-                  <div style={{
-                    fontFamily: "'Space Grotesk',system-ui,sans-serif",
-                    fontSize: "3rem", fontWeight: 900,
-                    color: "#fbbf24", textShadow: "0 0 30px #fbbf24",
-                    lineHeight: 1, margin: "4px 0 14px",
-                  }}>
-                    {lastResolvedRound?.winning_tile ?? "—"}
-                  </div>
-                  <div style={{ fontSize: 10, letterSpacing: ".22em", color: "#9ca3af", fontWeight: 800 }}>
-                    NEW ROUND STARTING IN
-                  </div>
-                  <div style={{
-                    fontFamily: "'JetBrains Mono',monospace",
-                    fontSize: "4rem", fontWeight: 900,
-                    color: "#00d4ff", textShadow: "0 0 20px #00d4ff",
-                    lineHeight: 1, marginTop: 4,
-                  }}>
-                    {cooldownSeconds}
-                  </div>
-                </div>
-              </div>
-            )}
+            <PvpWheelVisual
+              size={SIZE}
+              tiles={TILES}
+              roundId={status?.round_id ?? null}
+              timeLeftMs={isCooldown ? 0 : timeLeftMs}
+              totalRoundMs={totalRoundMsRef.current}
+              isOpen={isOpen}
+              isLocked={isLocked}
+              isCooldown={isCooldown}
+              cooldownMs={cooldownMsLeft || cooldownSeconds * 1000}
+              players={myBets.filter((b) => b.round_id === status?.round_id).length}
+              pot={status?.total_pool ?? 0}
+              winningTile={lastResolvedRound?.winning_tile ?? null}
+              myTiles={myTilesThisRound}
+              onTileClick={onSegmentClick}
+            />
 
             {endedOverlay && (
               <div style={{
