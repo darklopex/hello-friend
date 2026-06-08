@@ -16,15 +16,42 @@ import WinnersMarquee from "./components/WinnersMarquee";
 import PointsToast from "./components/PointsToast";
 import YourPointsModal from "./components/YourPointsModal";
 import HeaderStats from "./components/HeaderStats";
+import PvpPage from "./components/PvpPage";
+
+function PvpButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 8,
+        background: "#7c3aed", color: "#fff", border: "3px solid #000",
+        borderRadius: 12, padding: "12px 20px", fontWeight: 900,
+        fontFamily: "'Space Grotesk',system-ui,sans-serif",
+        letterSpacing: ".08em", textTransform: "uppercase",
+        boxShadow: "5px 5px 0 0 rgba(0,0,0,.9)", cursor: "pointer",
+        fontSize: 13, lineHeight: 1,
+      }}
+      onMouseDown={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "translate(3px,3px)"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "2px 2px 0 0 rgba(0,0,0,.9)"; }}
+      onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = ""; (e.currentTarget as HTMLButtonElement).style.boxShadow = "5px 5px 0 0 rgba(0,0,0,.9)"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = ""; (e.currentTarget as HTMLButtonElement).style.boxShadow = "5px 5px 0 0 rgba(0,0,0,.9)"; }}
+    >
+      <span style={{ fontSize: 14 }}>⚔</span> PVP
+    </button>
+  );
+}
 
 export default function App() {
-  const [view, setView] = React.useState<"home" | "zone">(
-    typeof window !== "undefined" && window.location.pathname.startsWith("/bettingzone") ? "zone" : "home"
-  );
+  const initialView = (): "home" | "zone" | "pvp" => {
+    if (typeof window === "undefined") return "home";
+    if (window.location.pathname.startsWith("/pvp")) return "pvp";
+    if (window.location.pathname.startsWith("/bettingzone")) return "zone";
+    return "home";
+  };
+  const [view, setView] = React.useState<"home" | "zone" | "pvp">(initialView);
 
-  const goView = React.useCallback((next: "home" | "zone") => {
+  const goView = React.useCallback((next: "home" | "zone" | "pvp") => {
     setView(next);
-    const path = next === "zone" ? "/bettingzone" : "/";
+    const path = next === "zone" ? "/bettingzone" : next === "pvp" ? "/pvp" : "/";
     if (typeof window !== "undefined" && window.location.pathname !== path) {
       window.history.pushState({}, "", path);
     }
@@ -32,7 +59,7 @@ export default function App() {
 
   React.useEffect(() => {
     const onPop = () => {
-      setView(window.location.pathname.startsWith("/bettingzone") ? "zone" : "home");
+      setView(initialView());
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -138,6 +165,10 @@ export default function App() {
   const totalLiveStaked = rounds.reduce((s, r) => s + r.totalStaked, 0);
   const totalLivePlayers = rounds.reduce((s, r) => s + r.players, 0);
 
+  if (view === "pvp") {
+    return <PvpPage onBack={() => goView("home")} />;
+  }
+
   if (view === "home") {
     return (
       <>
@@ -147,7 +178,10 @@ export default function App() {
               <img src="https://raw.githubusercontent.com/dopedopex/your-friendly-helper/main/logo.png" alt="BetsOnBlock" width={36} height={36} style={{ borderRadius: 10, objectFit: "cover" }} />
               <div><h1>Bets<b>On</b>Block</h1></div>
             </div>
-            <div style={{ flex: 1, display: "flex", justifyContent: "center" }}><HeaderStats /></div>
+            <div style={{ flex: 1, display: "flex", justifyContent: "center", gap: 10 }}>
+              <HeaderStats />
+              <PvpButton onClick={() => goView("pvp")} />
+            </div>
             <div className="top-right">
               <div className="live-head"><span className="pulse" /> Block <b className="mono" style={{ marginLeft: 4 }}>#{head?.toLocaleString() ?? "…"}</b></div>
               <button className="btn btn-primary btn-sm" onClick={() => goView("zone")}>Enter Zone</button>
@@ -170,7 +204,10 @@ export default function App() {
             <img src="https://raw.githubusercontent.com/dopedopex/your-friendly-helper/main/logo.png" alt="BetsOnBlock" width={36} height={36} style={{ borderRadius: 10, objectFit: "cover" }} />
             <div><h1>Bets<b>On</b>Block</h1></div>
           </div>
-          <div style={{ flex: 1, display: "flex", justifyContent: "center" }}><HeaderStats /></div>
+          <div style={{ flex: 1, display: "flex", justifyContent: "center", gap: 10 }}>
+            <HeaderStats />
+            <PvpButton onClick={() => goView("pvp")} />
+          </div>
           <div className="top-right">
             <div className="live-head"><span className="pulse" /> Block <b className="mono" style={{ marginLeft: 4 }}>#{head?.toLocaleString() ?? "…"}</b></div>
             <WalletButton />
