@@ -137,12 +137,13 @@ export default function App() {
 
   // live head ticker
   React.useEffect(() => {
+    if (view !== "zone") return;
     let alive = true;
     const t = async () => { try { const h = await api.head(); if (alive) setHead(h.block); } catch { /* */ } };
     t();
     const id = setInterval(t, 1500);
     return () => { alive = false; clearInterval(id); };
-  }, []);
+  }, [view]);
 
   // wallet change → full reset (clear live bets, force remount of round cards to reset mode/picks)
   const [resetKey, setResetKey] = React.useState(0);

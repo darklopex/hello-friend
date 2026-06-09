@@ -27,6 +27,7 @@ type MyBet = { round_id: number; tile: number; amount: number };
 type EndedRound = {
   round_id: number;
   winning_tile: number;
+  status?: string;
   drand_verify_url?: string;
   drand_round?: number | string;
 };
@@ -40,8 +41,30 @@ type RoundDetails = {
 };
 
 function numOrNull(value: unknown) {
+  if (value == null || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function validWinningTile(value: unknown) {
+  const n = numOrNull(value);
+  if (n == null || n < 1 || n > TILES) return null;
+  return n;
+}
+
+function normalizeEndedRound(raw: any): EndedRound | null {
+  const roundId = numOrNull(raw?.round_id ?? raw?.id ?? raw?.roundId);
+  const winningTile = validWinningTile(raw?.winning_tile);
+  const status = String(raw?.status ?? "").toLowerCase();
+  const isResolved = status === "resolved" || status === "settled" || status === "complete";
+  if (roundId == null || winningTile == null || (status && !isResolved)) return null;
+  return {
+    round_id: roundId,
+    winning_tile: winningTile,
+    status,
+    drand_verify_url: raw?.drand_verify_url,
+    drand_round: raw?.drand_target_round ?? raw?.drand_round,
+  };
 }
 
 export default function PvpPage({ onBack }: { onBack: () => void }) {
@@ -69,6 +92,8 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
   const pendingAnimationRoundRef = React.useRef<number | null>(null);
   const animationTriggeredRoundRef = React.useRef<number | null>(null);
   const activeStatusRef = React.useRef<string | null>(null);
+  const activeRoundRef = React.useRef<number | null>(null);
+  const historyRetryTimerRef = React.useRef<number | null>(null);
 
   // tick for countdown
   React.useEffect(() => {
@@ -80,6 +105,35 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
   const lastPollStatusRef = React.useRef<string | null>(null);
   const lastPollRoundRef = React.useRef<number | null>(null);
   const loadHistoryRef = React.useRef<(roundId?: number | null) => void>(() => {});
+  const clearHistoryRetry = React.useCallback(() => {
+    if (historyRetryTimerRef.current != null) {
+      window.clearTimeout(historyRetryTimerRef.current);
+      historyRetryTimerRef.current = null;
+    }
+  }, []);
+  const startAnimationForWinner = React.useCallback((winner: EndedRound, reason: string) => {
+    const roundId = numOrNull(winner.round_id);
+    const tile = validWinningTile(winner.winning_tile);
+    if (roundId == null || tile == null) return false;
+    if (animationTriggeredRoundRef.current === roundId) return false;
+    const stableWinner = { ...winner, round_id: roundId, winning_tile: tile };
+    console.log("[Animation] winner found — starting wheel animation", { ...stableWinner, reason });
+    clearHistoryRetry();
+    animationTriggeredRoundRef.current = roundId;
+    pendingAnimationRoundRef.current = null;
+    setAnimationWinner(stableWinner);
+    setLastResolvedRound(stableWinner);
+    return true;
+  }, [clearHistoryRetry]);
+  const scheduleWinnerRetry = React.useCallback((roundId: number) => {
+    if (historyRetryTimerRef.current != null) return;
+    historyRetryTimerRef.current = window.setTimeout(() => {
+      historyRetryTimerRef.current = null;
+      if (pendingAnimationRoundRef.current === roundId && animationTriggeredRoundRef.current !== roundId) {
+        loadHistoryRef.current?.(roundId);
+      }
+    }, 650);
+  }, []);
   const queueAnimationForRound = React.useCallback((roundId: number | null, reason: string) => {
     if (roundId == null) return;
     if (animationTriggeredRoundRef.current === roundId || pendingAnimationRoundRef.current === roundId) return;
@@ -95,23 +149,37 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       const apiRoundId = numOrNull(j.round_id ?? j.id ?? j.roundId);
       console.log("[Poll]", j.status, "round:", apiRoundId ?? j.round_id, "time_left:", j.time_left_ms);
 
+      const statusWinnerTile = validWinningTile(j.winning_tile ?? j.result?.winning_tile);
+      if (apiRoundId != null && statusWinnerTile != null && j.status !== "open") {
+        startAnimationForWinner({
+          round_id: apiRoundId,
+          winning_tile: statusWinnerTile,
+          status: String(j.status ?? "").toLowerCase(),
+          drand_verify_url: j.drand_verify_url,
+          drand_round: j.drand_target_round ?? j.drand_round,
+        }, "status");
+      } else if (apiRoundId != null && j.status !== "open" && animationTriggeredRoundRef.current !== apiRoundId) {
+        loadHistoryRef.current?.(apiRoundId);
+      }
+
       const prevStatus = lastPollStatusRef.current;
       const prevRound = lastPollRoundRef.current;
 
-      // TRIGGER 1: entering locked/cooldown resolve window
-      const enteringLocked = j.status === "locked" && prevStatus !== "locked";
+      // TRIGGER 1: entering cooldown / new-round window. Do not queue on locked/verifying;
+      // at that point drand often has not returned a winning tile yet.
       const enteringCooldown = j.status === "cooldown" && prevStatus !== "cooldown";
       // TRIGGER 2: round_id changed (previous round just ended)
       const roundChanged = prevRound != null && apiRoundId != null && prevRound !== apiRoundId;
 
-      if (enteringLocked || enteringCooldown || roundChanged) {
+      if (enteringCooldown || roundChanged) {
         const endedRoundId = roundChanged ? prevRound : (apiRoundId ?? prevRound);
-        console.log("[Poll] round ended — fetching history for winner", { enteringLocked, enteringCooldown, roundChanged, endedRoundId, prevRound, newRound: apiRoundId });
-        queueAnimationForRound(endedRoundId, enteringCooldown ? "cooldown" : enteringLocked ? "locked" : "round-change");
+        console.log("[Poll] round ended — fetching history for winner", { enteringCooldown, roundChanged, endedRoundId, prevRound, newRound: apiRoundId });
+        queueAnimationForRound(endedRoundId, enteringCooldown ? "cooldown" : "round-change");
       }
 
       lastPollStatusRef.current = j.status ?? null;
       activeStatusRef.current = j.status ?? null;
+      activeRoundRef.current = apiRoundId;
       if (apiRoundId != null) lastPollRoundRef.current = apiRoundId;
 
       setStatus({
@@ -123,7 +191,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       setStatusFetchedAt(Date.now());
     } catch (e) { console.error("[BetsOnBlock] status fetch error:", e); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queueAnimationForRound]);
+  }, [queueAnimationForRound, startAnimationForWinner]);
   React.useEffect(() => {
     loadStatus();
     const id = setInterval(loadStatus, 1000);
@@ -137,32 +205,30 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       if (!r.ok) { console.error("[BetsOnBlock] history http", r.status); return; }
       const j = await r.json();
       console.log("[BetsOnBlock] history:", j);
-      const arr: EndedRound[] = Array.isArray(j) ? j : (j.history || j.rounds || []);
-      const normalized = arr.map((r: any) => ({
-        round_id: r.round_id ?? r.id ?? r.roundId,
-        winning_tile: r.winning_tile,
-        drand_verify_url: r.drand_verify_url,
-        drand_round: r.drand_target_round ?? r.drand_round,
-      })).filter((r) => Number.isFinite(Number(r.round_id)) && Number.isFinite(Number(r.winning_tile)))
-        .map((r) => ({ ...r, round_id: Number(r.round_id), winning_tile: Number(r.winning_tile) }));
+      const arr: any[] = Array.isArray(j) ? j : (j.history || j.rounds || []);
+      const normalized = arr
+        .map(normalizeEndedRound)
+        .filter((r): r is EndedRound => r != null)
+        .sort((a, b) => b.round_id - a.round_id);
       setHistory(normalized.slice(0, 10));
       if (normalized[0]) setLastResolvedRound((prev) => prev?.round_id === normalized[0].round_id ? prev : normalized[0]);
 
       const wantedRound = targetRoundId ?? pendingAnimationRoundRef.current;
-      const fallbackWinner = wantedRound == null && activeStatusRef.current === "cooldown" ? normalized[0] : null;
+      const latestResolvedCurrentRound = normalized[0]?.round_id === activeRoundRef.current ? normalized[0] : null;
+      const fallbackWinner = wantedRound == null && activeStatusRef.current !== "open"
+        ? (latestResolvedCurrentRound ?? (activeStatusRef.current === "cooldown" ? normalized[0] : null))
+        : null;
       const winner = wantedRound != null ? normalized.find((item) => item.round_id === wantedRound) : fallbackWinner;
-      if (winner && animationTriggeredRoundRef.current !== winner.round_id) {
-        console.log("[Animation] winner found — starting wheel animation", winner);
-        animationTriggeredRoundRef.current = winner.round_id;
-        pendingAnimationRoundRef.current = null;
-        setAnimationWinner(winner);
-        setLastResolvedRound(winner);
+      if (winner) {
+        startAnimationForWinner(winner, wantedRound != null ? "history-exact" : "history-latest");
       } else if (wantedRound != null) {
         console.log("[Animation] winner not ready yet", { wantedRound });
+        scheduleWinnerRetry(wantedRound);
       }
     } catch (e) { console.error("[BetsOnBlock] history fetch error:", e); }
-  }, []);
+  }, [scheduleWinnerRetry, startAnimationForWinner]);
   React.useEffect(() => { loadHistoryRef.current = loadHistory; }, [loadHistory]);
+  React.useEffect(() => () => clearHistoryRetry(), [clearHistoryRetry]);
   React.useEffect(() => {
     loadHistory();
     const id = setInterval(loadHistory, 10000);
@@ -356,6 +422,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
               onTileClick={onSegmentClick}
               onAnimationComplete={() => {
                 console.log("[Animation] completed", animationWinner);
+                clearHistoryRetry();
                 setAnimationWinner(null);
                 pendingAnimationRoundRef.current = null;
                 prevStatusRef.current = "";

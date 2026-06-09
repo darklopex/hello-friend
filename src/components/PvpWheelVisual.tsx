@@ -123,10 +123,10 @@ export default function PvpWheelVisual({
         if (cancelled) return;
         setHighlighted(i);
         play(() => sounds.tick(280 + i * 12));
-        await sleep(55);
+        await sleep(22);
       }
       setHighlighted(null);
-      await sleep(120);
+      await sleep(50);
 
       // PHASE B — all tiles blink together
       if (cancelled) return;
@@ -136,9 +136,9 @@ export default function PvpWheelVisual({
         if (cancelled) return;
         setBlinkSet(all);
         play(() => sounds.tick(520));
-        await sleep(160);
+        await sleep(80);
         setBlinkSet(null);
-        await sleep(120);
+        await sleep(45);
       }
 
       // PHASE C — even tiles blink
@@ -149,9 +149,9 @@ export default function PvpWheelVisual({
         if (cancelled) return;
         setBlinkSet(evens);
         play(() => sounds.tick(620));
-        await sleep(150);
+        await sleep(70);
         setBlinkSet(null);
-        await sleep(110);
+        await sleep(40);
       }
 
       // PHASE D — odd tiles blink
@@ -162,9 +162,9 @@ export default function PvpWheelVisual({
         if (cancelled) return;
         setBlinkSet(odds);
         play(() => sounds.tick(720));
-        await sleep(150);
+        await sleep(70);
         setBlinkSet(null);
-        await sleep(110);
+        await sleep(40);
       }
 
       // PHASE E — fast sweep + slowdown landing exactly on winningTile
@@ -175,40 +175,28 @@ export default function PvpWheelVisual({
       let cur = 1;
       setHighlighted(cur);
 
-      // Fast spin: 3 full laps at constant fast speed
-      const fastTicks = TILE_COUNT * 3;
+      // Fast spin: short full lap so the already-known drand winner is picked quickly
+      const fastTicks = TILE_COUNT;
       for (let i = 0; i < fastTicks; i++) {
         if (cancelled) return;
-        cur = (cur % 30) + 1;
+        cur = (cur % TILE_COUNT) + 1;
         setHighlighted(cur);
         if (i % 2 === 0) play(() => sounds.tick(560));
-        await sleep(22);
+        await sleep(16);
       }
 
-      // Slowdown — guaranteed to stop on winningTile
-      const slowSpeeds = [28, 36, 48, 64, 84, 110, 145, 190, 250, 320, 410];
-      const minTicks = TILE_COUNT; // at least one full rotation in slow phase
-      let tickCount = 0;
-      let speedIndex = 0;
-      // Safety cap to absolutely prevent infinite loops
-      const maxTicks = TILE_COUNT * 6;
-      while (tickCount < maxTicks) {
+      // Final sweep — exact number of ticks, no waiting loop, always lands on winningTile
+      const distanceToWinner = (winningTile - cur + TILE_COUNT) % TILE_COUNT;
+      const finalTicks = TILE_COUNT + (distanceToWinner === 0 ? TILE_COUNT : distanceToWinner);
+      const slowWindow = Math.min(12, finalTicks);
+      for (let step = 1; step <= finalTicks; step++) {
         if (cancelled) return;
-        cur = (cur % 30) + 1;
+        cur = (cur % TILE_COUNT) + 1;
         setHighlighted(cur);
-        tickCount++;
-        const sp = slowSpeeds[Math.min(speedIndex, slowSpeeds.length - 1)];
-        play(() => sounds.tick(Math.max(220, 600 - tickCount * 8)));
-        await sleep(sp);
-
-        if (
-          tickCount >= minTicks &&
-          cur === winningTile &&
-          speedIndex >= slowSpeeds.length - 2
-        ) {
-          break; // stop exactly on winning tile
-        }
-        if (tickCount >= minTicks) speedIndex++;
+        const slowProgress = Math.max(0, step - (finalTicks - slowWindow)) / slowWindow;
+        const delay = Math.round(18 + 150 * slowProgress * slowProgress);
+        play(() => sounds.tick(Math.max(240, 640 - step * 9)));
+        await sleep(delay);
       }
 
       // Hard-guarantee final position
@@ -232,18 +220,18 @@ export default function PvpWheelVisual({
         line3: youWon ? `YOU WON! +${(myPayout ?? pot).toFixed(3)} zkLTC` : "",
       });
       setTimeout(() => setShake(false), 600);
-      await sleep(2400);
+      await sleep(1100);
 
 
       // PHASE G — new round loader
       setPhase("new-round");
       setDimOthers(false);
       setWinnerTile(null);
-      for (let c = 3; c >= 1; c--) {
+      for (let c = 5; c >= 1; c--) {
         if (cancelled) return;
         setCenter({ line1: "NEW ROUND IN", line2: String(c), countdown: true });
         play(() => sounds.tick(400 + (6 - c) * 40));
-        await sleep(800);
+        await sleep(360);
       }
 
       // PHASE H — reset + flash
