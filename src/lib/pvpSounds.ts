@@ -1,7 +1,17 @@
 // Inline Web Audio sound utility for PVP wheel — no deps.
+// Keep one shared context so a user gesture can unlock it once for later winner sounds.
+let audioCtx: AudioContext | null = null;
+
 const ac = () => {
-  try { return new (window.AudioContext || (window as any).webkitAudioContext)(); } catch { return null; }
+  try {
+    if (!audioCtx || audioCtx.state === "closed") {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    if (audioCtx.state === "suspended") void audioCtx.resume();
+    return audioCtx;
+  } catch { return null; }
 };
+
 const beep = (cfg: (a: AudioContext, o: OscillatorNode, g: GainNode) => number) => {
   const a = ac(); if (!a) return;
   const o = a.createOscillator(); const g = a.createGain();
@@ -11,6 +21,15 @@ const beep = (cfg: (a: AudioContext, o: OscillatorNode, g: GainNode) => number) 
 };
 
 export const sounds = {
+  unlock: () => {
+    const a = ac(); if (!a) return;
+    void a.resume();
+    const o = a.createOscillator();
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.0001, a.currentTime);
+    o.connect(g); g.connect(a.destination);
+    o.start(); o.stop(a.currentTime + 0.02);
+  },
   hover: () => beep((a, o, g) => {
     o.frequency.value = 600;
     g.gain.setValueAtTime(0.04, a.currentTime);
