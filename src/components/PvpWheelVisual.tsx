@@ -303,15 +303,23 @@ export default function PvpWheelVisual({
             const tileLabel = tile.id + 1;
             const isMine = myTiles.has(tileLabel);
             const interactive = isOpen && !animating;
+            const scatterActive = phase === "scatter" || phase === "logo";
+            const scatterRad = (tile.middleDegrees - 90) * Math.PI / 180;
+            const scatterDistance = phase === "logo" ? 128 : 58;
+            const scatterTransform = scatterActive
+              ? `translate(${Math.cos(scatterRad) * scatterDistance}px, ${Math.sin(scatterRad) * scatterDistance}px) rotate(${tile.middleDegrees * 0.12}deg) scale(${phase === "logo" ? 0.94 : 1})`
+              : s.transform;
+            const phaseOpacity = phase === "logo" && tileLabel > 12 && tileLabel < 23 ? 0.08 : s.opacity;
             return (
               <g
                 key={tile.id}
                 style={{
                   cursor: interactive ? "pointer" : "default",
                   filter: s.glow,
-                  transition: "filter 180ms ease, transform 220ms ease",
-                  transform: s.transform,
-                  transformOrigin: `${tile.labelX}px ${tile.labelY}px`,
+                  transition: "filter 180ms ease, transform 700ms cubic-bezier(.2,.9,.2,1), opacity 450ms ease",
+                  transform: scatterTransform,
+                  transformOrigin: "290px 290px",
+                  opacity: phaseOpacity,
                 }}
                 onPointerEnter={() => onTileEnter(tileLabel)}
                 onPointerLeave={onTileLeave}
@@ -347,6 +355,14 @@ export default function PvpWheelVisual({
             );
           })}
         </svg>
+
+        {phase === "logo" && (
+          <div className="pvp-sol-loader" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+        )}
 
         {/* HOVER TOOLTIP */}
         {tooltipVisible && tooltipTile != null && tooltipPos && (
@@ -392,6 +408,9 @@ export default function PvpWheelVisual({
             padding: 14,
             zIndex: 20,
             overflow: "hidden",
+            opacity: phase === "logo" ? 0 : 1,
+            transform: phase === "winner" ? "scale(1.04)" : "scale(1)",
+            transition: "opacity 240ms ease, transform 240ms ease",
           }}
         >
           <span style={{
@@ -456,6 +475,29 @@ export default function PvpWheelVisual({
           80% { transform: translate(4px, -3px); }
         }
         @keyframes pvpFlash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+        .pvp-sol-loader {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 9px;
+          z-index: 24;
+          pointer-events: none;
+          animation: pvpLogoIn 900ms ease both;
+        }
+        .pvp-sol-loader span {
+          width: 72px;
+          height: 16px;
+          border-radius: 3px;
+          transform: skewX(-22deg);
+          background: linear-gradient(90deg, #7c3aed, #22d3ee, #34d399);
+          box-shadow: 0 0 26px rgba(168,85,247,.75);
+        }
+        .pvp-sol-loader span:nth-child(2) { background: linear-gradient(90deg, #22d3ee, #34d399); transform: skewX(-22deg) translateX(-8px); }
+        .pvp-sol-loader span:nth-child(3) { background: linear-gradient(90deg, #a855f7, #7c3aed); transform: skewX(-22deg) translateX(8px); }
+        @keyframes pvpLogoIn { from { opacity: 0; transform: scale(.86); } 35% { opacity: 1; } to { opacity: 1; transform: scale(1); } }
       `}</style>
     </div>
   );
