@@ -1,68 +1,33 @@
 import React from "react";
+import { TILE_ANGLES } from "../lib/wheelMath";
+import {
+  setSoundEnabled,
+  playTick,
+  playClick,
+  playSuccessChime,
+  playRoundStarted,
+  playHeartbeat,
+} from "../lib/wheelAudio";
 
 /**
- * PvpWheelVisual — clean numbered ring (1..N) on the site's navy theme.
- * On round end runs a casino-style sequence (A→G):
- *   A) sequential blue fill 1→N (50ms per tile)
- *   B) 3 synchronized blinks (130ms each)
- *   C) fast rotation, 3 laps at 30ms/tile
- *   D) easing slowdown landing on the winner
- *   E) winner lock — winner explodes orange, others dim, wheel shakes
- *   F) "NEW ROUND IN" countdown with tick sound
- *   G) white flash + bounce-in reset on new round
- * The wheel always stays circular — never flattens.
+ * PvpWheelVisual — port of the reference MiningWheel from /server/src/components/MiningWheel.tsx.
+ * Uses the same TILE_ANGLES geometry, color palette, spin-glow sweep, and audio cues.
+ * Backend props are unchanged so PvpPage.tsx wiring keeps working.
  */
 
-type AnimPhase =
-  | "idle"
-  | "seqFill"
-  | "blink"
-  | "spinFast"
-  | "spinSlow"
-  | "winnerLock";
+type Phase =
+  | "idle"        // ACTIVE — accepting bets
+  | "closing"     // LOCKED — about to resolve
+  | "spin"        // SPIN_GLOW — sequential tile sweep
+  | "winner"      // WINNER_REVEALED — green flash on winner
+  | "showing";    // SHOWING_WINNERS — cooldown / persistent winner display
 
-function useAudio() {
-  const ctxRef = React.useRef<AudioContext | null>(null);
-  const get = () => {
-    if (typeof window === "undefined") return null;
-    if (!ctxRef.current) {
-      const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
-      if (AC) ctxRef.current = new AC();
-    }
-    return ctxRef.current;
-  };
-  const tone = (
-    freq: number, dur = 0.08, type: OscillatorType = "sine",
-    gain = 0.06, glide?: number,
-  ) => {
-    const ctx = get(); if (!ctx) return;
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, ctx.currentTime);
-    if (glide) o.frequency.exponentialRampToValueAtTime(glide, ctx.currentTime + dur);
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(gain, ctx.currentTime + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur);
-    o.connect(g); g.connect(ctx.destination);
-    o.start(); o.stop(ctx.currentTime + dur + 0.02);
-  };
-  return {
-    tick: () => tone(440, 0.1, "sine", 0.08),
-    blip: () => tone(520, 0.04, "square", 0.04),
-    whoosh: () => tone(220, 0.5, "sawtooth", 0.05, 880),
-    chime: () => {
-      tone(660, 0.18, "sine", 0.06);
-      setTimeout(() => tone(880, 0.18, "sine", 0.06), 120);
-      setTimeout(() => tone(1320, 0.34, "sine", 0.07), 260);
-    },
-  };
-}
+const TILE_COUNT = 30;
+const SPIN_STEP_MS = 40;            // 40ms * 30 = 1200ms full spin
+const WINNER_HOLD_MS = 1100;
 
 export default function PvpWheelVisual({
-  size = 520,
-  tiles,
+  size = 560,
   roundId,
   timeLeftMs,
   isOpen,
@@ -70,15 +35,15 @@ export default function PvpWheelVisual({
   isCooldown,
   cooldownMs,
   pot,
-  winningTile,
-  myTiles,
-  tilesWithBets,
+  winningTile,           // 1-based from API
+  myTiles,               // 1-based set
+  tilesWithBets,         // 1-based set
   myPayout,
-  onTileClick,
+  onTileClick,           // receives 1-based tile
   soundOn = true,
 }: {
   size?: number;
-  tiles: number;
+  tiles?: number;
   roundId: number | null;
   timeLeftMs: number;
   totalRoundMs?: number;
@@ -95,440 +60,430 @@ export default function PvpWheelVisual({
   onTileClick: (tile: number) => void;
   soundOn?: boolean;
 }) {
-  const audio = useAudio();
-  const secsLeft = Math.max(0, Math.ceil(timeLeftMs / 1000));
-  const cdSecs = Math.max(0, Math.ceil(cooldownMs / 1000));
+  // honor soundOn toggle through the audio module's global flag
+  React.useEffect(() => { setSoundEnabled(soundOn); }, [soundOn]);
 
-  const [phase, setPhase] = React.useState<AnimPhase>("idle");
-  const [seqIdx, setSeqIdx] = React.useState(0);
-  const [blinkOn, setBlinkOn] = React.useState(true);
-  const [spinIdx, setSpinIdx] = React.useState(0);
-  const [flash, setFlash] = React.useState(false);
-  const [shake, setShake] = React.useState(false);
-  const [bounceKey, setBounceKey] = React.useState(0);
-  const wonRef = React.useRef<number | null>(null);
-  const spinIdxRef = React.useRef(0);
-  React.useEffect(() => { spinIdxRef.current = spinIdx; }, [spinIdx]);
-
-  const lastTickSec = React.useRef(-1);
-  const lastCdSec = React.useRef(-1);
+  const [hovered, setHovered] = React.useState<number | null>(null);
+  const [phase, setPhase] = React.useState<Phase>("idle");
+  const [spotlight, setSpotlight] = React.useState<number | null>(null);
+  const lastWinnerRef = React.useRef<number | null>(null);
   const lastRoundRef = React.useRef<number | null>(null);
+  const lastTickSec = React.useRef<number>(-1);
 
-  // beep last 10s of open
+  // derive simple top-level phase from props (idle vs closing); animation overrides
   React.useEffect(() => {
-    if (!soundOn || isLocked || isCooldown || !isOpen) return;
-    if (secsLeft !== lastTickSec.current && secsLeft <= 10 && secsLeft > 0) {
-      lastTickSec.current = secsLeft;
-      audio.blip();
+    if (isOpen) {
+      if (phase !== "spin" && phase !== "winner" && phase !== "showing") setPhase("idle");
+    } else if (isLocked && phase === "idle") {
+      setPhase("closing");
     }
-  }, [secsLeft, soundOn, isOpen, isLocked, isCooldown]);
+    // when winner finishes and we are in cooldown, stay in "showing"
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, isLocked]);
 
-  // tick every second during cooldown
+  // detect new winning tile (and ensure round is no longer open) → run spin sequence
   React.useEffect(() => {
-    if (!soundOn || !isCooldown) return;
-    if (cdSecs !== lastCdSec.current && cdSecs > 0) {
-      lastCdSec.current = cdSecs;
-      audio.tick();
+    if (winningTile == null || isOpen) return;
+    if (lastWinnerRef.current === winningTile && phase !== "idle") return;
+    lastWinnerRef.current = winningTile;
+
+    const winIdx0 = (winningTile - 1 + TILE_COUNT) % TILE_COUNT;
+    setPhase("spin");
+
+    // build path: (winIdx+1, winIdx+2, ..., winIdx) wrapping — ends ON the winner
+    const order: number[] = [];
+    for (let i = 0; i < TILE_COUNT; i++) {
+      order.push((winIdx0 + 1 + i) % TILE_COUNT);
     }
-  }, [cdSecs, soundOn, isCooldown]);
 
-  // run sequence A→E whenever a new winner is announced
-  React.useEffect(() => {
-    if (winningTile == null) return;
-    if (wonRef.current === winningTile) return;
-    // only run when round is no longer open (locked or cooldown)
-    if (isOpen) return;
-    wonRef.current = winningTile;
-
-    const timers: number[] = [];
-    const intervals: number[] = [];
-    let alive = true;
-
-    // PHASE A
-    setPhase("seqFill"); setSeqIdx(0);
-    if (soundOn) audio.chime();
     let i = 0;
-    const seq = window.setInterval(() => {
-      if (!alive) return;
-      i += 1; setSeqIdx(i);
-      if (soundOn) audio.blip();
-      if (i >= tiles) window.clearInterval(seq);
-    }, 50);
-    intervals.push(seq);
-
-    const tA = tiles * 50 + 200;
-
-    // PHASE B — 3 blinks (6 toggles)
-    timers.push(window.setTimeout(() => {
-      if (!alive) return;
-      setPhase("blink"); setBlinkOn(true);
-      let n = 0;
-      const bi = window.setInterval(() => {
-        if (!alive) return;
-        n += 1; setBlinkOn((b) => !b);
-        if (n >= 5) window.clearInterval(bi);
-      }, 130);
-      intervals.push(bi);
-    }, tA));
-    const tB = tA + 6 * 130;
-
-    // PHASE C — fast rotation, 3 laps
-    const fastStep = 30;
-    const fastSteps = 3 * tiles;
-    timers.push(window.setTimeout(() => {
-      if (!alive) return;
-      setPhase("spinFast");
-      let k = 0;
-      const ci = window.setInterval(() => {
-        if (!alive) return;
-        k += 1;
-        setSpinIdx(((k - 1) % tiles) + 1);
-        if (soundOn && k % 2 === 0) audio.blip();
-        if (k >= fastSteps) window.clearInterval(ci);
-      }, fastStep);
-      intervals.push(ci);
-    }, tB));
-    const tC = tB + fastSteps * fastStep;
-
-    // PHASE D — slowdown into winner
-    timers.push(window.setTimeout(() => {
-      if (!alive) return;
-      setPhase("spinSlow");
-      const baseDurations = [40, 55, 75, 100, 130, 170, 220, 280, 350, 430, 520];
-      const start = ((spinIdxRef.current % tiles) || tiles);
-      let dist = (winningTile - start + tiles) % tiles;
-      if (dist === 0) dist = tiles;
-      const stepDurations: number[] = [];
-      for (let s = 0; s < dist; s++) {
-        const di = Math.floor((s / dist) * baseDurations.length);
-        stepDurations.push(baseDurations[Math.min(baseDurations.length - 1, di)]);
+    const timers: number[] = [];
+    const interval = window.setInterval(() => {
+      const next = order[i];
+      setSpotlight(next);
+      if (soundOn) playTick(i, order.length);
+      i++;
+      if (i >= order.length) {
+        window.clearInterval(interval);
+        setPhase("winner");
+        setSpotlight(winIdx0);
+        if (soundOn) playSuccessChime();
+        timers.push(
+          window.setTimeout(() => {
+            setPhase("showing");
+          }, WINNER_HOLD_MS),
+        );
       }
-      let acc = 0;
-      let cur = start;
-      stepDurations.forEach((dur) => {
-        acc += dur;
-        const at = acc;
-        timers.push(window.setTimeout(() => {
-          if (!alive) return;
-          cur = (cur % tiles) + 1;
-          setSpinIdx(cur);
-          if (soundOn) audio.blip();
-        }, at));
-      });
-      const dTotal = acc;
-
-      // PHASE E
-      timers.push(window.setTimeout(() => {
-        if (!alive) return;
-        setPhase("winnerLock");
-        setSpinIdx(winningTile);
-        if (soundOn) audio.chime();
-        setShake(true);
-        timers.push(window.setTimeout(() => setShake(false), 260));
-      }, dTotal + 20));
-    }, tC));
+    }, SPIN_STEP_MS);
 
     return () => {
-      alive = false;
+      window.clearInterval(interval);
       timers.forEach((t) => window.clearTimeout(t));
-      intervals.forEach((iv) => window.clearInterval(iv));
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCooldown, winningTile, tiles, soundOn]);
+  }, [winningTile, isOpen, soundOn]);
 
-  // PHASE G — new round
+  // new round → reset + whoosh
   React.useEffect(() => {
-    if (roundId !== lastRoundRef.current && lastRoundRef.current !== null) {
-      setFlash(true);
-      if (soundOn) audio.whoosh();
-      const t1 = window.setTimeout(() => setFlash(false), 320);
-      setPhase("idle");
-      setSeqIdx(0); setSpinIdx(0);
-      wonRef.current = null;
-      setBounceKey((k) => k + 1);
+    if (roundId == null) return;
+    if (lastRoundRef.current === null) { lastRoundRef.current = roundId; return; }
+    if (roundId !== lastRoundRef.current) {
       lastRoundRef.current = roundId;
-      return () => window.clearTimeout(t1);
+      lastWinnerRef.current = null;
+      setSpotlight(null);
+      setPhase(isOpen ? "idle" : "closing");
+      if (soundOn) playRoundStarted();
     }
-    if (lastRoundRef.current === null) lastRoundRef.current = roundId;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roundId]);
 
-  // geometry
-  const cx = size / 2;
-  const cy = size / 2;
-  const rOut = size * 0.48;
-  const rIn  = size * 0.34;
-  const rHub = size * 0.32;
-  const segA = (Math.PI * 2) / tiles;
+  // heartbeat for last 4 seconds of open
+  const secsLeft = Math.max(0, Math.ceil(timeLeftMs / 1000));
+  React.useEffect(() => {
+    if (!soundOn || !isOpen) return;
+    if (secsLeft === lastTickSec.current) return;
+    lastTickSec.current = secsLeft;
+    if (secsLeft > 0 && secsLeft <= 4) playHeartbeat();
+  }, [secsLeft, soundOn, isOpen]);
 
-  const path = (i: number, r1: number, r2: number, gap = 0.018) => {
-    const a = segA;
-    const a0 = i * a - Math.PI / 2 + gap;
-    const a1 = (i + 1) * a - Math.PI / 2 - gap;
-    const p = (ang: number, r: number) =>
-      `${cx + Math.cos(ang) * r} ${cy + Math.sin(ang) * r}`;
-    return `M ${p(a0, r2)} L ${p(a0, r1)} A ${r1} ${r1} 0 0 1 ${p(a1, r1)} L ${p(a1, r2)} A ${r2} ${r2} 0 0 0 ${p(a0, r2)} Z`;
-  };
-
-  const labelPos = (i: number) => {
-    const a = (i + 0.5) * segA - Math.PI / 2;
-    const r = (rOut + rIn) / 2;
-    return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, deg: (a * 180) / Math.PI + 90 };
-  };
-  const dotPos = (i: number) => {
-    const a = (i + 0.35) * segA - Math.PI / 2;
-    const r = rOut - size * 0.025;
-    return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
-  };
-
-  const fmt = (ms: number) => {
-    const s = Math.max(0, Math.ceil(ms / 1000));
-    return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-  };
-
-  const statusLabel = isLocked ? "LOCKED" : "ROUND OPEN";
-  const statusColor = isLocked ? "#ef4444" : "#f97316";
-
+  // ----- styling helpers (mirror MiningWheel.getTileStyles) -----
   type TileStyle = {
-    fill: string; stroke: string; opacity: number; scale: number;
-    glow?: string; textColor: string;
+    fill: string;
+    stroke: string;
+    strokeWidth: number;
+    glow: string;
+    opacity: number;
   };
-  const tileStyle = (tile: number): TileStyle => {
-    const idx = tile - 1;
-    const isWinner = winningTile != null && winningTile === tile;
-    const mine = myTiles.has(tile);
-    const base: TileStyle = {
-      fill: "#0f172a", stroke: "#1e3a5f", opacity: 1, scale: 1,
-      textColor: "#64748b",
+  const getTileStyles = (tileId0: number): TileStyle => {
+    const tileLabel = tileId0 + 1;
+    const isPlayerSelected = myTiles.has(tileLabel);
+    const isSpotlight = spotlight === tileId0;
+    const winIdx0 = winningTile != null ? winningTile - 1 : -1;
+    const isWinner = (phase === "winner" || phase === "showing") && tileId0 === winIdx0;
+
+    if (isWinner) {
+      return {
+        fill: "rgba(16, 185, 129, 0.24)",
+        stroke: "rgba(16, 185, 129, 0.98)",
+        strokeWidth: 2.8,
+        glow: "drop-shadow(0 0 25px rgba(16,185,129,0.5))",
+        opacity: 1,
+      };
+    }
+    if (isSpotlight && phase === "spin") {
+      return {
+        fill: "rgba(245, 158, 11, 0.28)",
+        stroke: "rgba(245, 158, 11, 0.98)",
+        strokeWidth: 2.5,
+        glow: "drop-shadow(0 0 22px rgba(245,158,11,0.45))",
+        opacity: 1,
+      };
+    }
+    if (isPlayerSelected) {
+      return {
+        fill: "rgba(244, 63, 94, 0.18)",
+        stroke: "rgba(244, 63, 94, 0.88)",
+        strokeWidth: 1.8,
+        glow: "drop-shadow(0 0 15px rgba(244,63,94,0.3))",
+        opacity: 1,
+      };
+    }
+    if (tilesWithBets?.has(tileLabel) && phase === "idle") {
+      return {
+        fill: "rgba(168, 85, 247, 0.10)",
+        stroke: "rgba(168, 85, 247, 0.45)",
+        strokeWidth: 1.2,
+        glow: "",
+        opacity: 0.9,
+      };
+    }
+    if (hovered === tileId0 && phase === "idle" && isOpen) {
+      return {
+        fill: "rgba(255,255,255,0.08)",
+        stroke: "rgba(255,255,255,0.45)",
+        strokeWidth: 1.5,
+        glow: "drop-shadow(0 0 12px rgba(255,255,255,0.15))",
+        opacity: 1,
+      };
+    }
+    if (phase === "closing") {
+      return {
+        fill: "rgba(15,23,42,0.15)",
+        stroke: "rgba(148,163,184,0.08)",
+        strokeWidth: 1.0,
+        glow: "",
+        opacity: 0.3,
+      };
+    }
+    return {
+      fill: "rgba(255,255,255,0.02)",
+      stroke: "rgba(255,255,255,0.16)",
+      strokeWidth: 1.1,
+      glow: "",
+      opacity: 0.65,
     };
-
-    if (phase === "seqFill") {
-      if (idx < seqIdx) return { ...base, fill: "#3b82f6", stroke: "#60a5fa", textColor: "#fff" };
-      return base;
-    }
-    if (phase === "blink") {
-      return blinkOn
-        ? { ...base, fill: "#3b82f6", stroke: "#60a5fa", textColor: "#fff" }
-        : { ...base, fill: "#0b1220", stroke: "#1e293b", textColor: "#475569" };
-    }
-    if (phase === "spinFast" || phase === "spinSlow") {
-      if (tile === spinIdx) {
-        return { ...base, fill: "#f97316", stroke: "#fdba74", textColor: "#fff",
-          glow: "drop-shadow(0 0 10px rgba(249,115,22,.9))" };
-      }
-      return { ...base, fill: "#0b1220", stroke: "#1e293b", textColor: "#475569" };
-    }
-    if (phase === "winnerLock") {
-      if (isWinner) {
-        return { fill: "#f97316", stroke: "#fdba74", opacity: 1, scale: 1.2,
-          textColor: "#fff",
-          glow: "drop-shadow(0 0 14px #f97316) drop-shadow(0 0 28px rgba(249,115,22,.6))" };
-      }
-      return { ...base, opacity: 0.2, scale: 0.92, fill: "#0b1220", stroke: "#1e293b" };
-    }
-    // idle
-    if (mine) return { ...base, fill: "#0f172a", stroke: "#10b981", textColor: "#fff" };
-    return base;
   };
 
-  const showWinnerCenter =
-    phase === "winnerLock" || (isCooldown && phase === "idle" && winningTile != null);
+  // ----- center HUD text -----
+  const fmtClock = (ms: number) => {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    return `00:${String(s % 60).padStart(2, "0")}`;
+  };
+  const winIdx0 = winningTile != null ? winningTile - 1 : -1;
   const youWon = winningTile != null && myTiles.has(winningTile);
 
+  const center = (() => {
+    if (phase === "spin") {
+      return {
+        header: "SOLVER SPINNING",
+        title: spotlight !== null ? `TILE #${spotlight + 1}` : "ROLLING",
+        sub: "SELECTING WINNING COORDINATE",
+        color: "#facc15",
+        pulse: true,
+      };
+    }
+    if (phase === "winner" || phase === "showing") {
+      return {
+        header: "WINNER DETERMINED",
+        title: `TILE #${winIdx0 + 1}`,
+        sub: youWon ? "🎉 YOU WON THIS ROUND!" : "ROUND COMPLETE",
+        color: "#34d399",
+        pulse: phase === "winner",
+      };
+    }
+    if (phase === "closing" || isLocked) {
+      return {
+        header: "CLOSING ROUND",
+        title: "VERIFYING",
+        sub: "COMPILING DRAND SEED",
+        color: "#fbbf24",
+        pulse: true,
+      };
+    }
+    // idle / open
+    return {
+      header: isOpen ? "ROUND OPEN" : "WAITING",
+      title: fmtClock(timeLeftMs),
+      sub: isOpen ? "PLACE YOUR BETS" : "NEXT ROUND INCOMING",
+      color: isOpen ? "#fb923c" : "#a1a1aa",
+      pulse: false,
+    };
+  })();
+
+  const cdSecs = Math.max(0, Math.ceil(cooldownMs / 1000));
+
   return (
-    <div style={{
-      position: "relative",
-      width: size, maxWidth: "100%",
-      aspectRatio: "1 / 1",
-      margin: "0 auto",
-      animation: shake ? "pvpShake 240ms linear" : undefined,
-    }}>
-      <svg
-        key={bounceKey}
-        width="100%" height="100%"
-        viewBox={`0 0 ${size} ${size}`}
-        style={{ display: "block", overflow: "visible" }}
+    <div className="flex flex-col items-center" style={{ width: size, maxWidth: "100%" }}>
+      <div
+        className="relative w-full aspect-square flex items-center justify-center p-4 rounded-full overflow-visible"
+        style={{
+          border: "1px dashed rgba(63,63,70,0.7)",
+          background: "rgba(9,9,11,0.4)",
+          boxShadow:
+            "0 25px 50px -12px rgba(0,0,0,0.7), inset 0 0 0 1px rgba(255,255,255,0.02)",
+        }}
       >
-        <defs>
-          <radialGradient id="pvpHaloRing" cx="50%" cy="50%" r="50%">
-            <stop offset="55%" stopColor="rgba(249,115,22,0)" />
-            <stop offset="100%" stopColor="rgba(249,115,22,0.10)" />
-          </radialGradient>
-        </defs>
+        {/* radial backdrops */}
+        <div
+          style={{
+            position: "absolute",
+            inset: "6%",
+            borderRadius: "50%",
+            background:
+              "radial-gradient(circle, rgba(249,115,22,0.03), rgba(15,23,42,0) 64%, transparent 75%)",
+            pointerEvents: "none",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: "15%",
+            borderRadius: "50%",
+            background:
+              "radial-gradient(circle, rgba(168,85,247,0.04), rgba(15,23,42,0) 56%, transparent 72%)",
+            pointerEvents: "none",
+          }}
+        />
+        {phase === "idle" && isOpen && (
+          <div
+            style={{
+              position: "absolute",
+              inset: "4%",
+              borderRadius: "50%",
+              border: "1px solid rgba(249,115,22,0.10)",
+              pointerEvents: "none",
+              animation: "pvpHaloSpin 18s linear infinite",
+            }}
+          />
+        )}
 
-        <circle cx={cx} cy={cy} r={rOut + 6} fill="url(#pvpHaloRing)" />
+        <svg
+          viewBox="0 0 580 580"
+          style={{ position: "relative", zIndex: 10, width: "100%", height: "100%", overflow: "visible", userSelect: "none", filter: "drop-shadow(0 10px 15px rgba(0,0,0,0.5))" }}
+          aria-label="PVP Wheel"
+        >
+          <g>
+            {TILE_ANGLES.map((tile) => {
+              const s = getTileStyles(tile.id);
+              const tileLabel = tile.id + 1;
+              const isMine = myTiles.has(tileLabel);
+              const interactive = phase === "idle" && isOpen;
+              return (
+                <g
+                  key={tile.id}
+                  style={{ cursor: interactive ? "pointer" : "default", filter: s.glow, transition: "filter 200ms ease" }}
+                  onPointerEnter={() => { if (interactive) setHovered(tile.id); }}
+                  onPointerLeave={() => { if (interactive) setHovered(null); }}
+                  onClick={() => {
+                    if (!interactive) return;
+                    playClick();
+                    onTileClick(tileLabel);
+                  }}
+                >
+                  <path
+                    d={tile.path}
+                    fill={s.fill}
+                    stroke={s.stroke}
+                    strokeWidth={s.strokeWidth}
+                    opacity={s.opacity}
+                    style={{ transition: "fill 180ms ease, stroke 180ms ease, stroke-width 180ms ease, opacity 180ms ease" }}
+                  />
+                  <g pointerEvents="none">
+                    {(isMine || s.strokeWidth > 2) && (
+                      <circle
+                        cx={tile.labelX}
+                        cy={tile.labelY}
+                        r={isMine ? 3.5 : 2.5}
+                        fill={isMine ? "#f43f5e" : "#f59e0b"}
+                      >
+                        <animate attributeName="opacity" values="1;0.4;1" dur="1.2s" repeatCount="indefinite" />
+                      </circle>
+                    )}
+                    <text
+                      x={tile.labelX}
+                      y={tile.labelY + (isMine || s.strokeWidth > 2 ? 14 : 4)}
+                      textAnchor="middle"
+                      fill="#a1a1aa"
+                      style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "0.62rem" }}
+                    >
+                      {tileLabel}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
+          </g>
+        </svg>
 
-        {Array.from({ length: tiles }).map((_, i) => {
-          const tile = i + 1;
-          const t = tileStyle(tile);
-          const { x, y, deg } = labelPos(i);
-          const mine = myTiles.has(tile);
-          const hasBet = tilesWithBets?.has(tile);
-          const dot = dotPos(i);
-          const enterDelay = phase === "idle" ? i * 20 : 0;
-          return (
-            <g
-              key={`t-${tile}`}
-              onClick={() => {
-                if (soundOn && isOpen) audio.tick();
-                onTileClick(tile);
-              }}
-              className="pvpTile"
-              data-default={t.fill === "#0f172a" && phase === "idle" ? "1" : "0"}
+        {/* CENTER OVERLAY */}
+        <div
+          style={{
+            position: "absolute",
+            inset: "33%",
+            borderRadius: "50%",
+            background: "rgba(9,9,11,0.9)",
+            border: "1px solid rgba(63,63,70,0.8)",
+            boxShadow: "inset 0 4px 30px rgba(0,0,0,0.8), 0 20px 50px rgba(0,0,0,0.7)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            textAlign: "center",
+            padding: 16,
+            zIndex: 20,
+            overflow: "hidden",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "0.58rem",
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.2em",
+              color: "#71717a",
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            }}
+          >
+            {center.header}
+          </span>
+          <div style={{ margin: "6px 0", height: 40, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span
               style={{
-                cursor: isOpen ? "pointer" : "not-allowed",
-                transform: `scale(${t.scale})`,
-                transformOrigin: `${x}px ${y}px`,
-                transition: "transform 260ms cubic-bezier(.22,.61,.36,1), opacity 260ms ease, filter 200ms ease",
-                opacity: t.opacity,
-                filter: t.glow,
-                animation: phase === "idle" ? `pvpTileIn 380ms ${enterDelay}ms both` : undefined,
+                fontSize: 28,
+                fontWeight: 800,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                letterSpacing: "0.04em",
+                color: center.color,
+                animation: center.pulse ? "pvpPulse 1.2s ease-in-out infinite" : undefined,
               }}
             >
-              <path
-                d={path(i, rIn, rOut, 0.02)}
-                fill={t.fill}
-                stroke={t.stroke}
-                strokeWidth={1}
-                style={{ transition: "fill 220ms ease, stroke 220ms ease" }}
-              />
-              {hasBet && !mine && phase === "idle" && (
-                <circle cx={dot.x} cy={dot.y} r={size * 0.012} fill="#06b6d4" />
-              )}
-              {mine && phase === "idle" && (
-                <text
-                  x={dot.x} y={dot.y}
-                  textAnchor="middle" dominantBaseline="central"
-                  fontSize={size * 0.022} fontWeight={900} fill="#10b981"
-                  style={{ pointerEvents: "none" }}
-                >✓</text>
-              )}
-              <text
-                x={x} y={y}
-                transform={`rotate(${deg} ${x} ${y})`}
-                textAnchor="middle" dominantBaseline="central"
-                fontSize={size * 0.024}
-                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-                fontWeight={700}
-                fill={t.textColor}
-                style={{ pointerEvents: "none", userSelect: "none",
-                  transition: "fill 220ms ease" }}
-              >
-                {tile}
-              </text>
-            </g>
-          );
-        })}
-
-        <circle cx={cx} cy={cy} r={rHub} fill="#0a0a0a"
-          stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
-        <circle cx={cx} cy={cy} r={rHub - 6} fill="none"
-          stroke="rgba(249,115,22,0.18)" strokeWidth={1} />
-      </svg>
-
-      {/* CENTER HUD */}
-      <div style={{
-        position: "absolute", inset: 0, display: "grid", placeItems: "center",
-        pointerEvents: "none", textAlign: "center",
-      }}>
-        {!isCooldown && (
-          <div>
-            <div style={{
-              fontSize: 11, letterSpacing: ".22em", color: statusColor,
-              fontWeight: 800, marginBottom: 6,
-            }}>{statusLabel}</div>
-            <div className="mono" style={{
-              fontSize: Math.round(size * 0.09), fontWeight: 800, color: "#fff",
-              letterSpacing: "-.02em",
-              textShadow: "0 0 22px rgba(249,115,22,.45)",
-            }}>{fmt(timeLeftMs)}</div>
-            <div style={{
-              marginTop: 10, display: "grid", gap: 4,
-              fontSize: 12, color: "rgba(255,255,255,.72)",
+              {center.title}
+            </span>
+          </div>
+          <p
+            style={{
+              fontSize: "0.58rem",
+              lineHeight: 1.4,
+              textTransform: "uppercase",
+              letterSpacing: "0.1em",
+              color: "#a1a1aa",
+              maxWidth: "12rem",
+              margin: 0,
               fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            }}>
-              <div><span style={{ color: "rgba(255,255,255,.5)" }}>POOL </span>
-                <b style={{ color: "#fff" }}>{pot.toFixed(3)}</b></div>
-              <div style={{ color: "#f97316" }}>ROUND #{roundId ?? "—"}</div>
+            }}
+          >
+            {center.sub}
+          </p>
+
+          {/* live stats / round meta */}
+          {phase === "idle" && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: 16,
+                display: "flex",
+                gap: 10,
+                fontSize: "0.6rem",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                color: "#a1a1aa",
+              }}
+            >
+              <span style={{ color: "#fb923c" }}>#{roundId ?? "—"}</span>
+              <span>•</span>
+              <span>POOL {pot.toFixed(3)}</span>
+              <span>•</span>
+              <span>MINE {myTiles.size}/30</span>
             </div>
-          </div>
-        )}
-
-        {isCooldown && phase !== "winnerLock" && phase !== "idle" && (
-          <div style={{
-            fontSize: 11, letterSpacing: ".28em", color: "#3b82f6",
-            fontWeight: 800,
-          }}>RESOLVING…</div>
-        )}
-
-        {showWinnerCenter && winningTile != null && (
-          <div>
-            <div style={{
-              fontSize: Math.round(size * 0.06), fontWeight: 900,
-              color: "#f97316",
-              textShadow: "0 0 22px rgba(249,115,22,.6)",
-              fontFamily: "'Space Grotesk',system-ui,sans-serif",
-              letterSpacing: ".02em",
-            }}>🏆 TILE {winningTile} WINS!</div>
-            <div style={{
-              marginTop: 8, fontSize: 13, color: "#94a3b8",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            }}>POOL: {pot.toFixed(3)} zkLTC</div>
-            {youWon && (
-              <div style={{
-                marginTop: 6, fontSize: 15, fontWeight: 900, color: "#10b981",
-                textShadow: "0 0 14px rgba(16,185,129,.5)",
-              }}>YOU WON!{myPayout ? ` +${myPayout.toFixed(3)} zkLTC` : ""}</div>
-            )}
-            <div style={{
-              marginTop: 14, fontSize: 11, letterSpacing: ".24em",
-              color: "#94a3b8", fontWeight: 800,
-            }}>NEW ROUND IN</div>
-            <div className="mono" style={{
-              fontSize: Math.round(size * 0.11), fontWeight: 800,
-              color: "#00d4ff", lineHeight: 1, marginTop: 2,
-              textShadow: "0 0 20px #00d4ff",
-            }}>{cdSecs}</div>
-          </div>
-        )}
+          )}
+          {(phase === "winner" || phase === "showing") && (
+            <div
+              style={{
+                position: "absolute",
+                bottom: 14,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 2,
+                fontSize: "0.6rem",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              }}
+            >
+              <span style={{ color: youWon ? "#34d399" : "#71717a", fontWeight: 700 }}>
+                {youWon
+                  ? `+${(myPayout ?? pot).toFixed(3)} zkLTC`
+                  : `POOL ${pot.toFixed(3)}`}
+              </span>
+              {isCooldown && cdSecs > 0 && (
+                <span style={{ color: "#a1a1aa" }}>NEXT IN {cdSecs}s</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {flash && (
-        <div style={{
-          position: "absolute", inset: 0, borderRadius: "50%",
-          background: "rgba(255,255,255,.5)",
-          animation: "pvpFlash 320ms ease both",
-          pointerEvents: "none",
-        }} />
-      )}
-
       <style>{`
-        @keyframes pvpFlash {
-          0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; }
-        }
-        @keyframes pvpShake {
-          0%,100% { transform: translateX(0); }
-          20% { transform: translateX(-5px); }
-          40% { transform: translateX(5px); }
-          60% { transform: translateX(-5px); }
-          80% { transform: translateX(5px); }
-        }
-        @keyframes pvpTileIn {
-          0%   { transform: scale(.9); opacity: 0; }
-          60%  { transform: scale(1.05); opacity: 1; }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        .pvpTile[data-default="1"]:hover path {
-          fill: #7c2d12 !important;
-          stroke: #f97316 !important;
-        }
-        .pvpTile[data-default="1"]:hover text {
-          fill: #fff !important;
-        }
-        .pvpTile[data-default="1"]:hover {
-          transform: scale(1.08) !important;
-          filter: drop-shadow(0 0 12px rgba(249,115,22,.5));
-        }
+        @keyframes pvpHaloSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes pvpPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
       `}</style>
     </div>
   );
