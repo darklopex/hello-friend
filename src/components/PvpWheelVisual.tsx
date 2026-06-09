@@ -1,6 +1,8 @@
 import React from "react";
 import { TILE_ANGLES } from "../lib/wheelMath";
 import { sounds } from "../lib/pvpSounds";
+import Coin from "./Coin";
+
 
 const TILE_COUNT = 30;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
