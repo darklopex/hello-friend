@@ -4,6 +4,7 @@ import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import CoinImg from "./Coin";
 import PvpWheelVisual from "./PvpWheelVisual";
+import { sounds } from "../lib/pvpSounds";
 
 const API = "https://lit-api.test-hub.xyz";
 const TILES = 30;
@@ -163,6 +164,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
     if (status.status === "cooldown") {
       const ms = status.cooldown_ms ?? (status.next_round_at ? status.next_round_at - Date.now() : 0);
       setCooldownSeconds(Math.max(0, Math.ceil(ms / 1000)));
+      if (prev !== "cooldown") loadHistory();
     } else if (prev === "cooldown" && status.status === "open") {
       setCooldownSeconds(0);
       setSpinInKey((k) => k + 1);
@@ -170,7 +172,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       setTimeout(() => setToast(null), 3500);
     }
     prevStatusRef.current = status.status;
-  }, [status]);
+  }, [status, loadHistory]);
 
   // tick cooldown each second
   React.useEffect(() => {
@@ -255,20 +257,33 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
     if (!Number.isFinite(amt) || amt <= 0) { setBetError("Enter a valid amount"); return; }
     setPlacing(true); setBetError(null);
     try {
+      const payload = { wallet: addr, tile: Number(selectedTile), amount: parseFloat(amount) };
+      console.log("Bet payload:", payload);
       const r = await fetch(`${API}/bets/place`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: addr, tile: selectedTile, amount: amt }),
+        body: JSON.stringify(payload),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j?.error) { setBetError(j?.error || `http_${r.status}`); }
+      if (!r.ok || j?.error) {
+        const msg = j?.error || `http_${r.status}`;
+        setBetError(msg);
+        setToast(`❌ ${msg}`);
+        setTimeout(() => setToast(null), 3500);
+      }
       else {
+        sounds.betPlaced();
+        setToast(`✅ Bet placed on Tile ${selectedTile}!`);
+        setTimeout(() => setToast(null), 3500);
         setSelectedTile(null);
         loadMyBets();
         loadStatus();
       }
     } catch (e: any) {
-      setBetError(e?.message || "Failed to place bet");
+      const msg = e?.message || "Failed to place bet";
+      setBetError(msg);
+      setToast(`❌ ${msg}`);
+      setTimeout(() => setToast(null), 3500);
     } finally { setPlacing(false); }
   };
 
