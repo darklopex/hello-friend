@@ -374,9 +374,17 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
               cooldownMs={cooldownMsLeft || cooldownSeconds * 1000}
               players={myBets.filter((b) => b.round_id === status?.round_id).length}
               pot={status?.total_pool ?? 0}
-              winningTile={lastResolvedRound?.winning_tile ?? null}
+              winningTile={animationWinner?.winning_tile ?? null}
+              animationRoundId={animationWinner?.round_id ?? null}
               myTiles={myTilesThisRound}
               onTileClick={onSegmentClick}
+              onAnimationComplete={() => {
+                console.log("[Animation] completed", animationWinner);
+                setAnimationWinner(null);
+                pendingAnimationRoundRef.current = null;
+                prevStatusRef.current = "";
+                prevRoundRef.current = null;
+              }}
             />
 
           </div>
