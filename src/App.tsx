@@ -17,6 +17,7 @@ import PointsToast from "./components/PointsToast";
 import YourPointsModal from "./components/YourPointsModal";
 import HeaderStats from "./components/HeaderStats";
 import PvpPage from "./components/PvpPage";
+import { sounds } from "./lib/pvpSounds";
 
 function PvpButton({ onClick }: { onClick: () => void }) {
   return (
@@ -31,7 +32,7 @@ function PvpButton({ onClick }: { onClick: () => void }) {
         boxShadow: "5px 5px 0 0 rgba(0,0,0,.9)", cursor: "pointer",
         fontSize: 13, lineHeight: 1,
       }}
-      onMouseDown={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = "translate(3px,3px)"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "2px 2px 0 0 rgba(0,0,0,.9)"; }}
+      onMouseDown={(e) => { sounds.unlock(); (e.currentTarget as HTMLButtonElement).style.transform = "translate(3px,3px)"; (e.currentTarget as HTMLButtonElement).style.boxShadow = "2px 2px 0 0 rgba(0,0,0,.9)"; }}
       onMouseUp={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = ""; (e.currentTarget as HTMLButtonElement).style.boxShadow = "5px 5px 0 0 rgba(0,0,0,.9)"; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = ""; (e.currentTarget as HTMLButtonElement).style.boxShadow = "5px 5px 0 0 rgba(0,0,0,.9)"; }}
     >

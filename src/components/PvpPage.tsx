@@ -95,6 +95,7 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
   const activeRoundRef = React.useRef<number | null>(null);
   const historyRetryTimerRef = React.useRef<number | null>(null);
   const zeroHoldTimerRef = React.useRef<number | null>(null);
+  const zeroHoldCallbacksRef = React.useRef<Array<() => void>>([]);
   const visibleRoundEndsAtRef = React.useRef<number>(0);
 
   // tick for countdown
@@ -154,10 +155,12 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
       fn();
       return;
     }
+    zeroHoldCallbacksRef.current.push(fn);
     if (zeroHoldTimerRef.current != null) return;
     zeroHoldTimerRef.current = window.setTimeout(() => {
       zeroHoldTimerRef.current = null;
-      fn();
+      const callbacks = zeroHoldCallbacksRef.current.splice(0);
+      callbacks.forEach((callback) => callback());
     }, msLeft + 120);
   }, []);
   const queueAnimationForRound = React.useCallback((roundId: number | null, reason: string) => {
