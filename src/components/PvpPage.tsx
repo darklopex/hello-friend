@@ -350,55 +350,80 @@ export default function PvpPage({ onBack }: { onBack: () => void }) {
   const myBetsThisRound = myBets.filter((b) => status && b.round_id === status.round_id);
   const myTilesThisRound = new Set(myBetsThisRound.map((b) => b.tile));
 
+  const setSelectedTiles = React.useCallback((s: Set<number>) => {
+    setSelectedTilesState(s);
+  }, []);
+
   const onSegmentClick = (tile: number) => {
     if (!addr) { openConnectModal?.(); return; }
     if (isLocked || isCooldown) return;
-    if (myTilesThisRound.has(tile)) {
-      setBetError("Already bet on this tile");
-      setSelectedTile(tile);
-      return;
-    }
-    setBetError(null);
-    setSelectedTile(tile);
-    setAmount("0.01");
+    setSelectedTilesState((prev) => {
+      const next = new Set(prev);
+      if (next.has(tile)) next.delete(tile); else next.add(tile);
+      return next;
+    });
   };
 
-  const placeBet = async () => {
-    if (selectedTile == null || !addr) return;
-    if (myTilesThisRound.has(selectedTile)) { setBetError("Already bet on this tile"); return; }
-    const amt = Number(amount);
-    if (!Number.isFinite(amt) || amt <= 0) { setBetError("Enter a valid amount"); return; }
-    setPlacing(true); setBetError(null);
-    try {
-      const payload = { wallet: addr, tile: Number(selectedTile), amount: parseFloat(amount) };
-      console.log("Bet payload:", payload);
-      const r = await fetch(PLACE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+  const placeBetsForTiles = React.useCallback(async (tiles: number[], amt: number) => {
+    if (!addr || tiles.length === 0) return;
+    setPlacing(true);
+    let okCount = 0;
+    let errMsg: string | null = null;
+    for (const tile of tiles) {
+      if (myTilesThisRound.has(tile)) continue;
+      try {
+        const r = await fetch(PLACE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet: addr, tile: Number(tile), amount: Number(amt) }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || j?.error) { errMsg = j?.error || `http_${r.status}`; }
+        else { okCount++; sounds.betPlaced(); }
+      } catch (e: any) { errMsg = e?.message || "fail"; }
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    setPlacing(false);
+    if (okCount > 0) {
+      setToast(`✓ Bet placed on ${okCount} tile${okCount > 1 ? "s" : ""}`);
+      setSelectedTilesState(new Set());
+      loadMyBets();
+      loadStatus();
+    } else if (errMsg) {
+      setToast(`❌ ${errMsg}`);
+    }
+    setTimeout(() => setToast(null), 3500);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addr, loadMyBets, loadStatus]);
+
+  // AUTO BETTING — when round changes and we still have rounds left, place bets
+  React.useEffect(() => {
+    if (!autoCfg || !isOpen || !status?.round_id || !addr) return;
+    if (autoCfg.roundsLeft <= 0 && !autoCfg.autoReload) {
+      setAutoCfg(null);
+      return;
+    }
+    if (lastAutoBetRoundRef.current === status.round_id) return;
+    lastAutoBetRoundRef.current = status.round_id;
+    (async () => {
+      await placeBetsForTiles(autoCfg.tiles, autoCfg.amount);
+      setAutoCfg((cur) => {
+        if (!cur) return cur;
+        if (cur.autoReload) return cur;
+        const next = { ...cur, roundsLeft: cur.roundsLeft - 1 };
+        if (next.roundsLeft <= 0) return null;
+        return next;
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || j?.error) {
-        const msg = j?.error || `http_${r.status}`;
-        setBetError(msg);
-        setToast(`❌ ${msg}`);
-        setTimeout(() => setToast(null), 3500);
-      }
-      else {
-        sounds.betPlaced();
-        setToast(`✅ Bet placed on Tile ${selectedTile}!`);
-        setTimeout(() => setToast(null), 3500);
-        setSelectedTile(null);
-        loadMyBets();
-        loadStatus();
-      }
-    } catch (e: any) {
-      const msg = e?.message || "Failed to place bet";
-      setBetError(msg);
-      setToast(`❌ ${msg}`);
-      setTimeout(() => setToast(null), 3500);
-    } finally { setPlacing(false); }
-  };
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCfg, isOpen, status?.round_id, addr]);
+
+  // clear selection when round changes (so a fresh round starts clean)
+  React.useEffect(() => {
+    setSelectedTilesState(new Set());
+  }, [status?.round_id]);
+
+
 
   // wheel geometry
   const SIZE = 560;
