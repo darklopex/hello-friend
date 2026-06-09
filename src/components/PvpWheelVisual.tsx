@@ -157,27 +157,38 @@ export default function PvpWheelVisual({
       if (cancelled) return;
       setPhase("sweep");
       setCenter({ line1: `ROUND #${animationKey}`, line2: "DRAND", line3: "PICKING WINNER" });
+
+      // Build a fixed step plan: fast laps then deceleration ending exactly on winningTile.
+      const target = winningTile; // captured
+      // Fast spin: 3 full laps at constant speed
+      const fastSteps = TILE_COUNT * 3;
+      // Deceleration: end on target. We compute steps so that after fastSteps + decelSteps we land on target.
+      // Start at tile 1, after fastSteps current = ((1-1 + fastSteps) % 30) + 1 = 1.
+      // We want final tile = target. decelSteps needed = ((target - 1) % 30) + extraLap*30
+      const extraLaps = 2;
+      const decelSteps = ((target - 1 + 30) % 30) + extraLaps * TILE_COUNT;
+      const totalSteps = fastSteps + decelSteps;
+
       let current = 1;
-      for (let t = 0; t < 60; t++) {
+      for (let step = 0; step < totalSteps; step++) {
         if (cancelled) return;
         setHighlighted(current);
-        if (t % 2 === 0) play(() => sounds.tick(600));
-        await sleep(22);
-        current = (current % 30) + 1;
-      }
-      const speeds = [26, 34, 44, 58, 78, 105, 140, 185, 240, 310, 400];
-      let speedIdx = 0;
-      let safety = 0;
-      while (safety++ < 200) {
-        if (cancelled) return;
-        setHighlighted(current);
-        const sp = speeds[Math.min(speedIdx, speeds.length - 1)];
-        play(() => sounds.tick(Math.max(200, 600 - speedIdx * 35)));
+        // speed curve: fast constant, then ease-out for decel portion
+        let sp: number;
+        if (step < fastSteps) {
+          sp = 24;
+        } else {
+          const t = (step - fastSteps) / Math.max(1, decelSteps - 1); // 0..1
+          // cubic ease-out from 28ms to 380ms
+          sp = 28 + Math.pow(t, 2.4) * 360;
+        }
+        if (step % 2 === 0) play(() => sounds.tick(Math.max(200, 620 - step * 4)));
         await sleep(sp);
-        if (current === winningTile && speedIdx >= speeds.length - 1) break;
-        current = (current % 30) + 1;
-        speedIdx++;
+        if (step < totalSteps - 1) current = (current % 30) + 1;
       }
+      // Ensure we end on target
+      setHighlighted(target);
+      await sleep(140);
 
       // PHASE F — land on winner
       if (cancelled) return;
